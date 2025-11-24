@@ -16,7 +16,7 @@ Creates a new Python interpreter instance with its own global scope.
 
 #### run(code)
 
-Executes Python code and returns the result.
+Executes Python code synchronously and returns the result.
 
 **Parameters:**
 - `code` (string): Python code to execute
@@ -29,6 +29,27 @@ Executes Python code and returns the result.
 const interpreter = new Interpreter();
 const result = interpreter.run('2 + 3');
 console.log(result.value); // 5
+```
+
+#### runAsync(code)
+
+Executes Python code asynchronously, supporting async/await and top-level await.
+
+**Parameters:**
+- `code` (string): Python code to execute (may contain async/await)
+
+**Returns:**
+- Promise<PyObject>: Promise resolving to the result
+
+**Example:**
+```javascript
+const interpreter = new Interpreter();
+const result = await interpreter.runAsync(`
+async def compute():
+    return 42
+await compute()
+`);
+console.log(result); // 42
 ```
 
 #### getGlobal(name)
@@ -230,6 +251,26 @@ Python function type.
 - `params` (Array): Parameter definitions
 - `body` (Array): Function body statements
 - `closure` (Scope): Closure scope
+- `isAsync` (boolean): Whether the function is async
+
+### PyCoroutine
+
+Python coroutine type (result of calling async function).
+
+**Properties:**
+- `func` (PyFunction): The async function
+- `__await__()`: Returns a Promise for the coroutine result
+
+**Example:**
+```javascript
+await interpreter.runAsync(`
+async def hello():
+    return "Hello"
+
+coro = hello()  # Creates PyCoroutine
+result = await coro  # Awaits the coroutine
+`);
+```
 
 ### PyClass
 
@@ -492,7 +533,8 @@ JSPyLike implements core Python 3 features but doesn't include:
 - Network operations
 - Most standard library modules
 - C extensions
-- Async/await (async functions)
+- Async iterators and generators (async for/async with)
+- asyncio module
 - Some advanced metaclass features
 - Certain optimization features
 

@@ -4,7 +4,7 @@ import {
   PyInt, PyFloat, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PY_NOTIMPLEMENTED,
   PyStr, PyList, PyTuple, PyDict, PySet, PyFrozenSet,
   PyFunction, PyMethod, PyClass, PyInstance, PyBuiltin, PySuper, PyProperty,
-  PyClassMethod, PyStaticMethod,
+  PyClassMethod, PyStaticMethod, PyCoroutine,
   PyRange, PyEnumerate, PyZip, PyMap, PyFilter, PySlice,
   toPy
 } from './types/index.js';
@@ -138,6 +138,7 @@ export class Interpreter {
     this.currentClass = null;  // Current class context for super()
     this.currentSelf = null;   // Current instance context for super()
     this.currentException = null;  // Current exception for re-raise
+    this.inAsyncContext = false;  // Track whether we're inside an async function
     this.setupBuiltins();
   }
 
@@ -1096,6 +1097,21 @@ export class Interpreter {
   async executeAsync(node) {
     if (!node) return PY_NONE;
 
+    // Special handling for Module nodes in async context
+    if (node.type === 'Module') {
+      const prevAsyncContext = this.inAsyncContext;
+      this.inAsyncContext = true;  // Enable top-level await
+      try {
+        let result = PY_NONE;
+        for (const stmt of node.body) {
+          result = await this.executeAsync(stmt);
+        }
+        return result;
+      } finally {
+        this.inAsyncContext = prevAsyncContext;
+      }
+    }
+
     const method = `visit${node.type}`;
     if (this[method]) {
       const result = this[method](node);
@@ -1631,6 +1647,12 @@ export class Interpreter {
     }
 
     if (func instanceof PyFunction) {
+      // Handle async functions
+      if (func.isAsync) {
+        // Create and return a coroutine object
+        return new PyCoroutine(func, args, this);
+      }
+
       // Handle generator functions
       if (func.isGenerator) {
         // Create and return a generator object
@@ -1639,7 +1661,11 @@ export class Interpreter {
 
       // Create new scope
       const prevScope = this.currentScope;
+      const prevAsyncContext = this.inAsyncContext;
       this.currentScope = new Scope(func.closure);
+
+      // Regular functions are NOT async context
+      this.inAsyncContext = false;
 
       try {
         // Analyze function body to find local variables (those that are assigned to)
@@ -1665,6 +1691,7 @@ export class Interpreter {
         throw e;
       } finally {
         this.currentScope = prevScope;
+        this.inAsyncContext = prevAsyncContext;
       }
     }
 
@@ -1708,6 +1735,53 @@ export class Interpreter {
     }
 
     throw new PyException('TypeError', `'${func.$type}' object is not callable`);
+  }
+
+  // Async version of callFunction for coroutines
+  async callFunctionAsync(func, args = [], kwargs = {}) {
+    // Handle PyMethod (bound method)
+    if (func instanceof PyMethod) {
+      // Add instance as first argument
+      args = [func.instance, ...args];
+      func = func.func;
+    }
+
+    // Handle PyFunction (async function)
+    if (func instanceof PyFunction && func.isAsync) {
+      // Create new scope
+      const prevScope = this.currentScope;
+      const prevAsyncContext = this.inAsyncContext;
+      this.currentScope = new Scope(func.closure);
+      this.inAsyncContext = true;
+
+      try {
+        // Analyze function body to find local variables
+        const localVars = this.findLocalVariables(func.body);
+        for (const varName of localVars) {
+          this.currentScope.localVars.add(varName);
+        }
+
+        // Bind parameters
+        this.bindParameters(func, args, kwargs);
+
+        // Execute function body asynchronously
+        for (const stmt of func.body) {
+          await this.executeAsync(stmt);
+        }
+        return PY_NONE;
+      } catch (e) {
+        if (e instanceof ReturnValue) {
+          return e.value;
+        }
+        throw e;
+      } finally {
+        this.currentScope = prevScope;
+        this.inAsyncContext = prevAsyncContext;
+      }
+    }
+
+    // For non-async functions, just call the regular version
+    return this.callFunction(func, args, kwargs);
   }
 
   // Create a generator object for a generator function
@@ -2001,11 +2075,34 @@ export class Interpreter {
     return this.execute(node);
   }
 
-  visitAwait(node) {
+  async visitAwait(node) {
     const value = this.execute(node.value);
-    // In sync context, just return the value
-    // In async context, this would return a Promise
-    return value;
+
+    // Check if we're in an async context
+    if (!this.inAsyncContext) {
+      throw new PyException('SyntaxError', "'await' outside async function");
+    }
+
+    // Handle PyCoroutine objects
+    if (value && value.$type === 'coroutine' && value.__await__) {
+      return await value.__await__();
+    }
+
+    // Handle JavaScript Promises directly
+    if (value instanceof Promise) {
+      return await value;
+    }
+
+    // Handle objects with __await__ method (awaitable protocol)
+    if (value && typeof value.__await__ === 'function') {
+      const awaitable = value.__await__();
+      if (awaitable instanceof Promise) {
+        return await awaitable;
+      }
+    }
+
+    // If it's not awaitable, raise an error
+    throw new PyException('TypeError', `object ${value?.$type || typeof value} can't be used in 'await' expression`);
   }
 
   visitLambda(node) {
@@ -2123,7 +2220,31 @@ export class Interpreter {
   }
 
   visitAssignment(node) {
+    // In async context, use async version
+    if (this.inAsyncContext) {
+      return this.visitAssignmentAsync(node);
+    }
+
+    // Sync version
     const value = this.execute(node.value);
+    for (const target of node.targets) {
+      this.assignTarget(target, value);
+    }
+    return PY_NONE;
+  }
+
+  async visitAssignmentAsync(node) {
+    // If we're in async context and the value could be a promise, await it
+    let value;
+    if (node.value.type === 'Await') {
+      value = await this.visitAwait(node.value);
+    } else {
+      value = this.execute(node.value);
+      // If the result is a promise (shouldn't normally happen), await it
+      if (value instanceof Promise) {
+        value = await value;
+      }
+    }
 
     for (const target of node.targets) {
       this.assignTarget(target, value);
@@ -2131,6 +2252,7 @@ export class Interpreter {
 
     return PY_NONE;
   }
+
 
   assignTarget(target, value) {
     if (target.type === 'Identifier') {
@@ -2560,6 +2682,12 @@ export class Interpreter {
   }
 
   visitTry(node) {
+    // In async context, we need to use async execution
+    if (this.inAsyncContext) {
+      return this.visitTryAsync(node);
+    }
+
+    // Synchronous version for non-async contexts
     try {
       for (const stmt of node.body) {
         this.execute(stmt);
@@ -2662,6 +2790,115 @@ export class Interpreter {
     } finally {
       for (const stmt of node.finalbody) {
         this.execute(stmt);
+      }
+    }
+
+    return PY_NONE;
+  }
+
+  // Async version of visitTry for async contexts
+  async visitTryAsync(node) {
+    try {
+      for (const stmt of node.body) {
+        await this.executeAsync(stmt);
+      }
+
+      // Execute else clause if no exception
+      for (const stmt of node.orelse) {
+        await this.executeAsync(stmt);
+      }
+    } catch (e) {
+      if (e instanceof PyException || e.pyType) {
+        let handled = false;
+
+        // Save and set current exception for re-raise
+        const prevException = this.currentException;
+        this.currentException = e;
+
+        for (const handler of node.handlers) {
+          const excType = handler.exceptionType ? this.execute(handler.exceptionType) : null;
+
+          // Check if exception matches the handler
+          let matches = false;
+          if (!excType) {
+            // Bare except catches everything
+            matches = true;
+          } else if (excType.isExceptionClass) {
+            // Built-in exception class - use inheritance checking
+            matches = isExceptionSubclass(e.pyType, excType.name);
+          } else if (excType instanceof PyClass && this._isExceptionClass(excType)) {
+            // Custom exception class - check if e matches this class or subclass
+            if (e.customClass) {
+              matches = this._isSubclassOf(e.customClass, excType);
+            } else {
+              // Fall back to name matching for built-in exceptions
+              matches = e.pyType === excType.name;
+            }
+          } else if (excType instanceof PyTuple) {
+            // Handle except (ExcType1, ExcType2):
+            matches = excType.elements.some(t => {
+              if (t.isExceptionClass) {
+                return isExceptionSubclass(e.pyType, t.name);
+              } else if (t instanceof PyClass && this._isExceptionClass(t)) {
+                if (e.customClass) {
+                  return this._isSubclassOf(e.customClass, t);
+                }
+                return e.pyType === t.name;
+              }
+              return false;
+            });
+          } else if (typeof excType.value === 'string') {
+            // Legacy: string comparison
+            matches = e.pyType === excType.value || excType.value === 'Exception';
+          }
+
+          if (matches) {
+            if (handler.name) {
+              // Store the exception object itself
+              const args = e.args || [new PyStr(e.pyMessage)];
+              const excObj = {
+                $type: e.pyType,
+                args: args,
+                __str__: () => e.pyMessage,
+                __repr__: () => `${e.pyType}('${e.pyMessage}')`,
+                toJS: () => e.pyMessage,
+                __getattr__: (name) => {
+                  if (name === 'args') {
+                    return {
+                      $type: 'tuple',
+                      elements: args,
+                      __len__: () => new PyInt(args.length),
+                      toJS: () => args.map(a => a && a.toJS ? a.toJS() : a)
+                    };
+                  }
+                  if (name === 'message') {
+                    return new PyStr(e.pyMessage);
+                  }
+                  throw new PyException('AttributeError', `'${e.pyType}' object has no attribute '${name}'`);
+                }
+              };
+              this.currentScope.set(handler.name, excObj);
+            }
+
+            for (const stmt of handler.body) {
+              await this.executeAsync(stmt);
+            }
+
+            handled = true;
+            break;
+          }
+        }
+
+        // Restore previous exception context
+        this.currentException = prevException;
+
+        if (!handled) throw e;
+      } else {
+        throw e;
+      }
+    } finally {
+      for (const stmt of node.finalbody) {
+        await this.executeAsync(stmt);
       }
     }
 

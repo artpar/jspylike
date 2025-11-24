@@ -5,11 +5,12 @@ A Python 3 interpreter written in JavaScript with 100% Python compliance for cor
 ## Features
 
 - **100% Python 3 Compliance**: All 821 core Python tests passing
-- **Full Python Syntax Support**: Classes, inheritance, decorators, generators, list comprehensions, and more
+- **Full Python Syntax Support**: Classes, inheritance, decorators, generators, async/await, list comprehensions, and more
 - **Python Built-in Types**: int, float, str, list, dict, set, frozenset, tuple with all standard methods
 - **Exception Handling**: Complete Python exception model including custom exceptions
 - **Scope Management**: Proper LEGB scope resolution with closure support
 - **Advanced Features**:
+  - Async/await with coroutine support
   - Multiple inheritance with C3 linearization (MRO)
   - Generator functions and expressions
   - Decorator support with proper closure handling
@@ -74,6 +75,20 @@ console.log(greeting.value); // "Hello, I'm Alice"
 
 ```javascript
 const interpreter = new Interpreter();
+
+// Async/await
+await interpreter.runAsync(`
+async def fetch_data():
+    # Simulate async operation
+    return {"status": "success", "data": [1, 2, 3]}
+
+async def process_data():
+    result = await fetch_data()
+    return result["data"]
+
+data = await process_data()
+print(data)  # [1, 2, 3]
+`);
 
 // Generators
 interpreter.run(`

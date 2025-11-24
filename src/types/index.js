@@ -466,6 +466,87 @@ export class PyGenerator extends PyObject {
   }
 }
 
+// Python coroutine (async function)
+export class PyCoroutine extends PyObject {
+  constructor(func, args, interpreter) {
+    super('coroutine');
+    this.$type = 'coroutine';  // Ensure $type is set
+    this.func = func;
+    this.args = args;
+    this.interpreter = interpreter;
+    this.started = false;
+    this.finished = false;
+    this.promise = null;
+    this.result = null;
+    this.exception = null;
+  }
+
+  __str__() {
+    return `<coroutine object ${this.func.name}>`;
+  }
+
+  __repr__() {
+    return this.__str__();
+  }
+
+  // Make coroutines awaitable
+  __await__() {
+    if (!this.promise) {
+      // Create the promise when first awaited
+      this.promise = this._execute();
+    }
+    return this.promise;
+  }
+
+  // Internal method to execute the coroutine
+  async _execute() {
+    if (this.started) {
+      throw new PyException('RuntimeError', 'coroutine already started');
+    }
+    this.started = true;
+
+    try {
+      // Execute the async function through the interpreter
+      const result = await this.interpreter.callFunctionAsync(this.func, this.args);
+      this.finished = true;
+      this.result = result;
+      return result;
+    } catch (error) {
+      this.finished = true;
+      this.exception = error;
+      throw error;
+    }
+  }
+
+  // Support for send() protocol (similar to generators)
+  send(value) {
+    if (!this.started) {
+      if (value !== null && value !== undefined) {
+        throw new PyException('TypeError', "can't send non-None value to a just-started coroutine");
+      }
+      return this.__await__();
+    }
+    throw new PyException('RuntimeError', 'coroutine send not fully implemented');
+  }
+
+  // Support for throw() protocol
+  throw(exc) {
+    if (!this.started) {
+      this.exception = exc;
+      throw exc;
+    }
+    throw new PyException('RuntimeError', 'coroutine throw not fully implemented');
+  }
+
+  // Support for close() protocol
+  close() {
+    if (!this.finished) {
+      this.finished = true;
+      // In Python, this would raise GeneratorExit
+    }
+  }
+}
+
 // Built-in function wrapper
 export class PyBuiltin extends PyObject {
   constructor(name, func, minArgs = 0, maxArgs = Infinity) {
