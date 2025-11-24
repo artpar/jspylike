@@ -6,11 +6,11 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/artpar/pylike.git"
+    "url": "git+https://github.com/artpar/jspylike.git"
   },
-  "homepage": "https://github.com/artpar/pylike#readme",
+  "homepage": "https://github.com/artpar/jspylike#readme",
   "bugs": {
-    "url": "https://github.com/artpar/pylike/issues"
+    "url": "https://github.com/artpar/jspylike/issues"
   },
   "author": "Parth Mudgal",
   "license": "MIT",

@@ -1,4 +1,4 @@
-# PyLike API Reference
+# JSPyLike API Reference
 
 ## Interpreter Class
 
@@ -480,14 +480,14 @@ for (let i = 0; i < 5; i++) {
 
 ## Performance Considerations
 
-- PyLike interprets Python code at runtime, making it slower than native Python
+- JSPyLike interprets Python code at runtime, making it slower than native Python
 - Use for scripting, not compute-intensive tasks
 - Cache parsed ASTs when running the same code multiple times
 - Minimize JavaScript-Python boundary crossings for better performance
 
 ## Limitations
 
-PyLike implements core Python 3 features but doesn't include:
+JSPyLike implements core Python 3 features but doesn't include:
 - File I/O operations
 - Network operations
 - Most standard library modules
@@ -496,4 +496,4 @@ PyLike implements core Python 3 features but doesn't include:
 - Some advanced metaclass features
 - Certain optimization features
 
-These omissions are by design to keep PyLike lightweight and suitable for embedded use.
+These omissions are by design to keep JSPyLike lightweight and suitable for embedded use.

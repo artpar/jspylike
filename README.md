@@ -1,4 +1,4 @@
-# PyLike
+# JSPyLike
 
 A Python 3 interpreter written in JavaScript with 100% Python compliance for core features.
 
@@ -155,7 +155,7 @@ All essential Python built-in functions including:
 
 ## Testing
 
-PyLike includes a comprehensive test suite with 821 tests covering all implemented features:
+JSPyLike includes a comprehensive test suite with 821 tests covering all implemented features:
 
 ```bash
 npm test
@@ -163,7 +163,7 @@ npm test
 
 ## Performance
 
-PyLike is designed for correctness and Python compatibility rather than performance. It's suitable for:
+JSPyLike is designed for correctness and Python compatibility rather than performance. It's suitable for:
 - Educational purposes
 - Embedded Python scripting in JavaScript applications
 - Prototyping and testing Python code in JavaScript environments
