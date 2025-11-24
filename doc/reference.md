@@ -58,7 +58,7 @@ Sets a variable in the global scope.
 
 **Example:**
 ```javascript
-import { PyInt } from 'pylike';
+import { PyInt } from 'jspylike';
 interpreter.setGlobal('y', new PyInt(100));
 interpreter.run('print(y)'); // Prints: 100
 ```
@@ -306,7 +306,7 @@ Parses Python code into an AST.
 
 **Example:**
 ```javascript
-import { Parser } from 'pylike';
+import { Parser } from 'jspylike';
 const parser = new Parser('x = 1 + 2');
 const ast = parser.parse();
 ```
@@ -406,7 +406,7 @@ Converts JavaScript value to Python object.
 You can add custom built-in functions:
 
 ```javascript
-import { PyFunction, PyStr, PY_NONE } from 'pylike';
+import { PyFunction, PyStr, PY_NONE } from 'jspylike';
 
 const customPrint = new PyFunction('my_print', ['message'], [], {
   isBuiltin: true,

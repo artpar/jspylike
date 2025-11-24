@@ -1,9 +1,30 @@
 {
-  "name": "pylike",
-  "version": "0.1.0",
-  "description": "Python 3 interpreter in JavaScript - CSP-safe, zero dependencies",
-  "main": "build/pylike.js",
+  "name": "jspylike",
+  "version": "0.0.1",
+  "description": "A Python 3 interpreter written in JavaScript with 100% Python compliance",
+  "main": "src/index.js",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artpar/pylike.git"
+  },
+  "homepage": "https://github.com/artpar/pylike#readme",
+  "bugs": {
+    "url": "https://github.com/artpar/pylike/issues"
+  },
+  "author": "Parth Mudgal",
+  "license": "MIT",
+  "keywords": [
+    "python",
+    "python3",
+    "interpreter",
+    "javascript",
+    "parser",
+    "ast",
+    "lexer",
+    "compiler",
+    "csp-safe"
+  ],
   "scripts": {
     "build": "node scripts/build.js",
     "test": "node tests/index.js",
@@ -13,12 +34,8 @@
     "test:legacy": "node tests/run.js",
     "dev": "node src/index.js"
   },
-  "keywords": [
-    "python",
-    "interpreter",
-    "parser",
-    "csp-safe"
-  ],
-  "license": "MIT",
-  "devDependencies": {}
+  "devDependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  }
 }

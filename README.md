@@ -22,7 +22,7 @@ A Python 3 interpreter written in JavaScript with 100% Python compliance for cor
 ## Installation
 
 ```bash
-npm install pylike
+npm install jspylike
 ```
 
 ## Usage
@@ -30,7 +30,7 @@ npm install pylike
 ### Basic Usage
 
 ```javascript
-import { Interpreter } from 'pylike';
+import { Interpreter } from 'jspylike';
 
 const interpreter = new Interpreter();
 
