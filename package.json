@@ -1,0 +1,24 @@
+{
+  "name": "pylike",
+  "version": "0.1.0",
+  "description": "Python 3 interpreter in JavaScript - CSP-safe, zero dependencies",
+  "main": "build/pylike.js",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node tests/index.js",
+    "test:verbose": "node tests/index.js -v",
+    "test:filter": "node tests/index.js -f",
+    "test:bail": "node tests/index.js --bail",
+    "test:legacy": "node tests/run.js",
+    "dev": "node src/index.js"
+  },
+  "keywords": [
+    "python",
+    "interpreter",
+    "parser",
+    "csp-safe"
+  ],
+  "license": "MIT",
+  "devDependencies": {}
+}
