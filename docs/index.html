@@ -480,12 +480,19 @@ for square in squares_gen:
         // Custom print function to capture output
         let outputLines = [];
 
+        // BigInt-safe JSON stringifier
+        function safeStringify(obj) {
+            return JSON.stringify(obj, (key, value) =>
+                typeof value === 'bigint' ? Number(value) : value
+            );
+        }
+
         function customPrint(...args) {
             const line = args.map(arg => {
                 if (typeof arg === 'object' && arg !== null) {
-                    if (arg.toJS) return JSON.stringify(arg.toJS());
+                    if (arg.toJS) return safeStringify(arg.toJS());
                     if (arg.value !== undefined) return String(arg.value);
-                    return JSON.stringify(arg);
+                    return safeStringify(arg);
                 }
                 return String(arg);
             }).join(' ');
@@ -530,9 +537,9 @@ for square in squares_gen:
                         if (arg && arg.__str__) return arg.__str__();
                         // Handle Python objects with value property
                         if (typeof arg === 'object' && arg !== null) {
-                            if (arg.toJS) return JSON.stringify(arg.toJS());
+                            if (arg.toJS) return safeStringify(arg.toJS());
                             if (arg.value !== undefined) return String(arg.value);
-                            return JSON.stringify(arg);
+                            return safeStringify(arg);
                         }
                         return String(arg);
                     }).join(' ');
