@@ -4,7 +4,7 @@ A Python 3 interpreter written in JavaScript with 100% Python compliance for cor
 
 ## Features
 
-- **100% Python 3 Compliance**: All 874 core Python tests passing
+- **100% Python 3 Compliance**: All 821 core Python tests passing
 - **Full Python Syntax Support**: Classes, inheritance, decorators, generators, async/await, list comprehensions, and more
 - **Python Built-in Types**: int, float, str, list, dict, set, frozenset, tuple with all standard methods
 - **Exception Handling**: Complete Python exception model including custom exceptions
@@ -173,7 +173,7 @@ All essential Python built-in functions including:
 
 ## Testing
 
-JSPyLike includes a comprehensive test suite with 874 tests covering all implemented features:
+JSPyLike includes a comprehensive test suite with 821 tests covering all implemented features:
 
 ```bash
 npm test

@@ -1,9 +1,13 @@
 {
   "name": "jspylike",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "A Python 3 interpreter written in JavaScript with 100% Python compliance",
   "main": "src/index.js",
   "type": "module",
+  "bin": {
+    "pylike": "./bin/pylike.js",
+    "jspylike": "./bin/pylike.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/artpar/jspylike.git"
@@ -32,7 +36,9 @@
     "test:filter": "node tests/index.js -f",
     "test:bail": "node tests/index.js --bail",
     "test:legacy": "node tests/run.js",
-    "dev": "node src/index.js"
+    "dev": "node src/index.js",
+    "repl": "node bin/pylike.js",
+    "run": "node bin/pylike.js"
   },
   "devDependencies": {},
   "engines": {
