@@ -267,7 +267,7 @@
             <div class="header-left">
                 <h1>JSPyLike Playground</h1>
                 <div class="header-meta">
-                    <span class="meta-item">874 tests passing</span>
+                    <span class="meta-item">1333 tests passing</span>
                     <span class="meta-item">v1.0.0</span>
                 </div>
             </div>
@@ -319,7 +319,7 @@ print(f"Squares: {squares}")
                     </div>
                 </div>
                 <div class="output-content" id="output">
-                    <div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>
+                    <div class="output-info">Loading interpreter...</div>
                 </div>
             </div>
         </div>
@@ -328,8 +328,13 @@ print(f"Squares: {squares}")
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
     <script type="module">
-        // Import jspylike from local bundle (also available via CDN)
-        import { Interpreter, PyBuiltin, PY_NONE } from './lib/src/index.js';
+        // Always load from GitHub CDN with cache-busting timestamp
+        // jsDelivr purges cache on new commits, @latest always gets newest version
+        const cdnBase = 'https://cdn.jsdelivr.net/gh/artpar/jspylike@main/src';
+
+        // Dynamic import with cache-busting query param
+        const cacheBuster = Date.now();
+        const { Interpreter, PyBuiltin, PY_NONE } = await import(`${cdnBase}/index.js?v=${cacheBuster}`);
 
         const examples = {
             hello: `# Hello World
@@ -598,8 +603,8 @@ for square in squares_gen:
             'Cmd-Enter': runCode
         });
 
-        // Auto-run on load (commented out for now)
-        // setTimeout(() => runCode(), 100);
+        // Mark as ready
+        output.innerHTML = '<div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>';
     </script>
 </body>
 </html>
