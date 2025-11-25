@@ -1,6 +1,6 @@
 // Export all Python types
 export { PyObject, PyException, StopIteration, StopAsyncIteration, GeneratorReturn } from './base.js';
-export { PyInt, PyFloat, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PyNotImplemented, PY_NOTIMPLEMENTED } from './primitives.js';
+export { PyInt, PyFloat, PyComplex, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PyNotImplemented, PY_NOTIMPLEMENTED } from './primitives.js';
 export { PyStr } from './string.js';
 export { PyList, PyTuple, PyDict, PySet, PyFrozenSet } from './collections.js';
 
@@ -226,6 +226,12 @@ export class PyClass extends PyObject {
     if (name === '__name__') {
       return new PyStr(this.name);
     }
+    if (name === '__mro__') {
+      return new PyTuple(this.getMRO());
+    }
+    if (name === '__bases__') {
+      return new PyTuple(this.bases);
+    }
 
     // Search through MRO for attribute
     const mro = this.getMRO();
@@ -286,6 +292,20 @@ export class PyInstance extends PyObject {
   }
 
   __getattr__(name) {
+    // Handle special attributes
+    if (name === '__class__') {
+      return this.cls;
+    }
+    if (name === '__dict__') {
+      // Return a dict-like object for the instance's attributes
+      const PyDict = this.constructor.PyDict;  // May need import
+      const d = {};
+      for (const [key, value] of Object.entries(this.attrs)) {
+        d[key] = value;
+      }
+      return d;
+    }
+
     // Check instance attrs first (unless it's a data descriptor)
     const instanceAttr = name in this.attrs ? this.attrs[name] : undefined;
 
@@ -364,6 +384,18 @@ export class PyInstance extends PyObject {
   }
 
   __setattr__(name, value) {
+    // Check for property descriptor with setter
+    if (name in this.cls.methods) {
+      const method = this.cls.methods[name];
+      if (method && method.$type === 'property') {
+        if (method.fset) {
+          // Return marker to tell interpreter to call the setter
+          return { __property_set__: true, setter: method.fset, instance: this, value };
+        }
+        throw new PyException('AttributeError', "can't set attribute");
+      }
+    }
+
     // Check for user-defined __setattr__
     if ('__setattr__' in this.cls.methods) {
       return { __custom_setattr__: true, method: this.cls.methods['__setattr__'], instance: this, name, value };
@@ -372,6 +404,16 @@ export class PyInstance extends PyObject {
   }
 
   __delattr__(name) {
+    // Check for property descriptor with deleter
+    if (name in this.cls.methods) {
+      const method = this.cls.methods[name];
+      if (method && method.$type === 'property') {
+        if (method.fdel) {
+          return { __property_del__: true, deleter: method.fdel, instance: this };
+        }
+        throw new PyException('AttributeError', "can't delete attribute");
+      }
+    }
     // Check for user-defined __delattr__
     if ('__delattr__' in this.cls.methods) {
       return { __custom_delattr__: true, method: this.cls.methods['__delattr__'], instance: this, name };
@@ -401,12 +443,27 @@ export class PySuper extends PyObject {
   }
 
   __getattr__(name) {
-    // Find the method in parent classes (simplified MRO)
-    const searchInClass = (cls) => {
+    // Use the actual MRO of the instance's class for proper cooperative inheritance
+    const instanceClass = this.obj.cls;
+    const mro = instanceClass.getMRO ? instanceClass.getMRO() : [instanceClass, ...(instanceClass.bases || [])];
+
+    // Find the position of this.cls in the MRO
+    let startIndex = -1;
+    for (let i = 0; i < mro.length; i++) {
+      if (mro[i] === this.cls) {
+        startIndex = i;
+        break;
+      }
+    }
+
+    // Search starting from the NEXT class after this.cls in the MRO
+    for (let i = startIndex + 1; i < mro.length; i++) {
+      const cls = mro[i];
       // Check methods
       if (cls.methods && name in cls.methods) {
         const method = cls.methods[name];
         if (method instanceof PyFunction) {
+          // Pass the class that defines the method for proper super() chaining
           return new PyMethod(method, this.obj, cls);
         }
         return method;
@@ -415,18 +472,6 @@ export class PySuper extends PyObject {
       if (cls.classAttrs && name in cls.classAttrs) {
         return cls.classAttrs[name];
       }
-      // Recursively check bases
-      for (const base of cls.bases || []) {
-        const found = searchInClass(base);
-        if (found !== null) return found;
-      }
-      return null;
-    };
-
-    // Search in each direct base of this.cls
-    for (const base of this.cls.bases || []) {
-      const found = searchInClass(base);
-      if (found !== null) return found;
     }
     throw new PyException('AttributeError', `'super' object has no attribute '${name}'`);
   }

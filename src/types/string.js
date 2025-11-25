@@ -811,8 +811,17 @@ export class PyStr extends PyObject {
       }
     }
 
+    // Handle zero-padding flag (e.g., {:05d})
+    if (zero && !align) {
+      fill = '0';
+      align = '=';  // Pad after sign
+    }
+
     const width = widthStr ? parseInt(widthStr) : 0;
     const precision = precisionStr ? parseInt(precisionStr) : null;
+
+    // Determine if this is a numeric type for default alignment
+    const isNumericType = type && 'bcdoxXeEfFgGn%'.includes(type);
 
     // Get string representation
     let str;
@@ -908,8 +917,12 @@ export class PyStr extends PyObject {
           str = padding + str;
         }
       } else {
-        // Default alignment
-        str = padding + str;
+        // Default alignment: left for strings, right for numbers
+        if (isNumericType) {
+          str = padding + str;  // Right-align numbers
+        } else {
+          str = str + padding;  // Left-align strings
+        }
       }
     }
 

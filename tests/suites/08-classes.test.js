@@ -76,6 +76,42 @@ result = dog.speak()
       assert.equal(interp.globalScope.get('result').toJS(), 'some sound');
     });
 
+    test('inherited __init__ from parent', () => {
+      const interp = new Interpreter();
+      const result = interp.run(`
+class Animal:
+    def __init__(self, name):
+        self.name = name
+
+class Dog(Animal):
+    def speak(self):
+        return f"{self.name} says Woof!"
+
+dog = Dog("Buddy")
+dog.speak()
+`);
+      assert.equal(result.value, "Buddy says Woof!");
+    });
+
+    test('inherited __init__ from grandparent', () => {
+      const interp = new Interpreter();
+      const result = interp.run(`
+class Base:
+    def __init__(self, x):
+        self.x = x
+
+class Middle(Base):
+    pass
+
+class Child(Middle):
+    pass
+
+c = Child(42)
+c.x
+`);
+      assert.equal(Number(result.value), 42);
+    });
+
     test('method override', () => {
       const interp = new Interpreter();
       interp.run(`

@@ -1,7 +1,7 @@
 import { Parser } from './parser.js';
 import {
   PyObject, PyException, StopIteration, StopAsyncIteration, GeneratorReturn,
-  PyInt, PyFloat, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PY_NOTIMPLEMENTED,
+  PyInt, PyFloat, PyComplex, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PY_NOTIMPLEMENTED,
   PyStr, PyList, PyTuple, PyDict, PySet, PyFrozenSet,
   PyFunction, PyMethod, PyClass, PyInstance, PyBuiltin, PySuper, PyProperty,
   PyClassMethod, PyStaticMethod, PyCoroutine, PyAsyncGenerator,
@@ -559,9 +559,16 @@ export class Interpreter {
           if (x === null) return new PyStr('');
           // Check for custom __str__ on PyInstance
           if (x instanceof PyInstance) {
-            const method = x.cls.methods['__str__'] || this._getInheritedMethod(x.cls, '__str__');
-            if (method) {
-              const result = this.callFunction(new PyMethod(method, x), []);
+            const strMethod = x.cls.methods['__str__'] || this._getInheritedMethod(x.cls, '__str__');
+            if (strMethod) {
+              const result = this.callFunction(new PyMethod(strMethod, x), []);
+              if (result instanceof PyStr) return result;
+              return new PyStr(result.__str__());
+            }
+            // Fallback to __repr__ if no __str__
+            const reprMethod = x.cls.methods['__repr__'] || this._getInheritedMethod(x.cls, '__repr__');
+            if (reprMethod) {
+              const result = this.callFunction(new PyMethod(reprMethod, x), []);
               if (result instanceof PyStr) return result;
               return new PyStr(result.__str__());
             }
@@ -614,9 +621,10 @@ export class Interpreter {
       }, 0, 1),
 
       // I/O
-      'print': new PyBuiltin('print', (...args) => {
-        const sep = ' ';
-        const end = '\n';
+      'print': new PyBuiltin('print', (args, kwargs = {}) => {
+        // Extract sep and end from kwargs, with Python defaults
+        const sep = kwargs.sep !== undefined ? kwargs.sep.__str__() : ' ';
+        const end = kwargs.end !== undefined ? kwargs.end.__str__() : '\n';
         const output = args.map(a => a.__str__()).join(sep) + end;
         if (typeof process !== 'undefined') {
           process.stdout.write(output);
@@ -687,13 +695,30 @@ export class Interpreter {
         const items = this._iterateToArray(iterable);
         const rev = reverse instanceof PyBool ? reverse.value : Boolean(reverse);
 
+        // Helper to compare values, supporting custom __lt__ on PyInstance
+        const compareLt = (a, b) => {
+          // Check for custom __lt__ on PyInstance
+          if (a instanceof PyInstance) {
+            const method = a.cls.methods['__lt__'] || this._getInheritedMethod(a.cls, '__lt__');
+            if (method) {
+              const result = this.callFunction(new PyMethod(method, a), [b]);
+              return result.__bool__ ? result.__bool__() : Boolean(result.value);
+            }
+          }
+          // Fall back to standard __lt__
+          if (typeof a.__lt__ === 'function') {
+            return a.__lt__(b);
+          }
+          throw new PyException('TypeError', `'<' not supported between instances of '${a.$type}' and '${b.$type}'`);
+        };
+
         // Sort with key function
         items.sort((a, b) => {
           const aKey = key ? this.callFunction(key, [a]) : a;
           const bKey = key ? this.callFunction(key, [b]) : b;
 
-          if (aKey.__lt__(bKey)) return rev ? 1 : -1;
-          if (bKey.__lt__(aKey)) return rev ? -1 : 1;
+          if (compareLt(aKey, bKey)) return rev ? 1 : -1;
+          if (compareLt(bKey, aKey)) return rev ? -1 : 1;
           return 0;
         });
 
@@ -716,35 +741,70 @@ export class Interpreter {
         }
         if (x instanceof PyInt) return new PyInt(x.value < 0n ? -x.value : x.value);
         if (x instanceof PyFloat) return new PyFloat(Math.abs(x.value));
+        if (x instanceof PyComplex) return x.__abs__();
         throw new PyException('TypeError', `bad operand type for abs(): '${x.$type}'`);
       }, 1, 1),
 
-      'min': new PyBuiltin('min', (...args) => {
+      'min': new PyBuiltin('min', (args, kwargs = {}) => {
+        // min(iterable, *, key=None, default=<no value>)
+        // min(arg1, arg2, *args, key=None)
         let items;
         if (args.length === 1) {
           items = this._iterateToArray(args[0]);
         } else {
           items = args;
         }
-        if (items.length === 0) throw new PyException('ValueError', 'min() arg is an empty sequence');
+
+        const keyFunc = kwargs.key || null;
+        const hasDefault = 'default' in kwargs;
+        const defaultVal = kwargs.default;
+
+        if (items.length === 0) {
+          if (hasDefault) return defaultVal;
+          throw new PyException('ValueError', 'min() arg is an empty sequence');
+        }
+
         let min = items[0];
+        let minKey = keyFunc ? this.callFunction(keyFunc, [min]) : min;
+
         for (let i = 1; i < items.length; i++) {
-          if (items[i].__lt__(min)) min = items[i];
+          const itemKey = keyFunc ? this.callFunction(keyFunc, [items[i]]) : items[i];
+          if (itemKey.__lt__(minKey)) {
+            min = items[i];
+            minKey = itemKey;
+          }
         }
         return min;
       }, 1, Infinity),
 
-      'max': new PyBuiltin('max', (...args) => {
+      'max': new PyBuiltin('max', (args, kwargs = {}) => {
+        // max(iterable, *, key=None, default=<no value>)
+        // max(arg1, arg2, *args, key=None)
         let items;
         if (args.length === 1) {
           items = this._iterateToArray(args[0]);
         } else {
           items = args;
         }
-        if (items.length === 0) throw new PyException('ValueError', 'max() arg is an empty sequence');
+
+        const keyFunc = kwargs.key || null;
+        const hasDefault = 'default' in kwargs;
+        const defaultVal = kwargs.default;
+
+        if (items.length === 0) {
+          if (hasDefault) return defaultVal;
+          throw new PyException('ValueError', 'max() arg is an empty sequence');
+        }
+
         let max = items[0];
+        let maxKey = keyFunc ? this.callFunction(keyFunc, [max]) : max;
+
         for (let i = 1; i < items.length; i++) {
-          if (max.__lt__(items[i])) max = items[i];
+          const itemKey = keyFunc ? this.callFunction(keyFunc, [items[i]]) : items[i];
+          if (maxKey.__lt__(itemKey)) {
+            max = items[i];
+            maxKey = itemKey;
+          }
         }
         return max;
       }, 1, Infinity),
@@ -936,6 +996,26 @@ export class Interpreter {
         return new PyList(sortedNames.map(n => new PyStr(n)));
       }, 0, 1),
 
+      'vars': new PyBuiltin('vars', (obj = null) => {
+        if (obj === null) {
+          // Return current local scope as dict
+          const d = new PyDict([], this);
+          for (const [key, value] of this.currentScope.vars) {
+            d.set(new PyStr(key), value);
+          }
+          return d;
+        }
+        if (obj instanceof PyInstance) {
+          // Return object's __dict__ (instance attributes)
+          const d = new PyDict([], this);
+          for (const [key, value] of Object.entries(obj.attrs)) {
+            d.set(new PyStr(key), value);
+          }
+          return d;
+        }
+        throw new PyException('TypeError', `vars() argument must have __dict__ attribute`);
+      }, 0, 1),
+
       'callable': new PyBuiltin('callable', (obj) => {
         return (obj instanceof PyFunction || obj instanceof PyBuiltin ||
                 obj instanceof PyClass || obj instanceof PyMethod) ? PY_TRUE : PY_FALSE;
@@ -963,9 +1043,77 @@ export class Interpreter {
         return new PyInt(obj.__hash__());
       }, 1, 1),
 
-      'iter': new PyBuiltin('iter', (obj) => {
-        return this._getIterator(obj);
-      }, 1, 1),
+      'eval': new PyBuiltin('eval', (source, globals = null, locals = null) => {
+        // Get the string to evaluate
+        let code;
+        if (source instanceof PyStr) {
+          code = source.value;
+        } else if (typeof source === 'string') {
+          code = source;
+        } else {
+          throw new PyException('TypeError', 'eval() arg 1 must be a string');
+        }
+
+        // Parse as expression
+        const parser = new Parser(code.trim());
+        const ast = parser.parseExpression();
+
+        // Create scope from globals/locals if provided
+        const prevScope = this.currentScope;
+        if (globals !== null || locals !== null) {
+          // For now, execute in current scope
+          // Full globals/locals support would require more work
+        }
+
+        // Execute and return result
+        const result = this.execute(ast);
+        return result;
+      }, 1, 3),
+
+      'exec': new PyBuiltin('exec', (source, globals = null, locals = null) => {
+        // Get the string to execute
+        let code;
+        if (source instanceof PyStr) {
+          code = source.value;
+        } else if (typeof source === 'string') {
+          code = source;
+        } else {
+          throw new PyException('TypeError', 'exec() arg 1 must be a string');
+        }
+
+        // Parse as statements
+        const parser = new Parser(code);
+        const ast = parser.parse();
+
+        // Execute each statement
+        for (const stmt of ast.body) {
+          this.execute(stmt);
+        }
+
+        return PY_NONE;
+      }, 1, 3),
+
+      'iter': new PyBuiltin('iter', (obj, sentinel = null) => {
+        if (sentinel === null) {
+          // Single-argument form: iter(iterable)
+          return this._getIterator(obj);
+        }
+        // Two-argument form: iter(callable, sentinel)
+        // Returns an iterator that calls callable until it returns sentinel
+        const callable = obj;
+        const self = this;
+        return {
+          $type: 'callable_iterator',
+          __iter__() { return this; },
+          __next__() {
+            const result = self.callFunction(callable, []);
+            if (result.__eq__(sentinel)) {
+              throw new StopIteration();
+            }
+            return result;
+          }
+        };
+      }, 1, 2),
 
       'next': new PyBuiltin('next', (iterator, defaultValue = null) => {
         try {
@@ -998,6 +1146,30 @@ export class Interpreter {
           throw new PyException('ValueError', 'chr() arg not in range(0x110000)');
         }
         return new PyStr(String.fromCodePoint(code));
+      }, 1, 1),
+
+      'bin': new PyBuiltin('bin', (x) => {
+        const num = x instanceof PyInt ? x.value : BigInt(Math.trunc(x.value));
+        if (num < 0n) {
+          return new PyStr('-0b' + (-num).toString(2));
+        }
+        return new PyStr('0b' + num.toString(2));
+      }, 1, 1),
+
+      'oct': new PyBuiltin('oct', (x) => {
+        const num = x instanceof PyInt ? x.value : BigInt(Math.trunc(x.value));
+        if (num < 0n) {
+          return new PyStr('-0o' + (-num).toString(8));
+        }
+        return new PyStr('0o' + num.toString(8));
+      }, 1, 1),
+
+      'hex': new PyBuiltin('hex', (x) => {
+        const num = x instanceof PyInt ? x.value : BigInt(Math.trunc(x.value));
+        if (num < 0n) {
+          return new PyStr('-0x' + (-num).toString(16));
+        }
+        return new PyStr('0x' + num.toString(16));
       }, 1, 1),
 
       'round': new PyBuiltin('round', (number, ndigits = null) => {
@@ -1223,8 +1395,8 @@ export class Interpreter {
   // Literals
   visitNumberLiteral(node) {
     if (typeof node.value === 'object' && node.value.imag !== undefined) {
-      // Complex number - simplified handling
-      return new PyFloat(node.value.imag);
+      // Complex number literal (e.g., 4j)
+      return new PyComplex(node.value.real, node.value.imag);
     }
     // Check if raw string has decimal point or 'e' to determine if it's a float
     // This handles cases like 3.0 which JavaScript converts to 3
@@ -2072,6 +2244,22 @@ export class Interpreter {
         return func._pyObject.format(...args);
       }
 
+      // Special handling for print() - pass kwargs for sep/end
+      if (func.name === 'print') {
+        return func.__call__(args, kwargs);
+      }
+
+      // Special handling for min/max - pass args array and kwargs for key/default
+      if (func.name === 'min' || func.name === 'max') {
+        return func.__call__(args, kwargs);
+      }
+
+      // Special handling for enumerate - pass kwargs for start
+      if (func.name === 'enumerate') {
+        const start = kwargs.start !== undefined ? kwargs.start : null;
+        return func.__call__(args[0], start);
+      }
+
       const mapping = builtinKwargs[func.name] || {};
       const finalArgs = [...args];
 
@@ -2172,6 +2360,12 @@ export class Interpreter {
       } else if (func.bases && Array.isArray(func.bases)) {
         // Check for __init__ in base classes
         for (const base of func.bases) {
+          // First check if the base itself has __init__
+          if (base.methods && '__init__' in base.methods) {
+            this.callFunction(new PyMethod(base.methods['__init__'], instance), args, kwargs);
+            break;
+          }
+          // Then check inherited from the base's parents
           const initMethod = this._getInheritedMethod(base, '__init__');
           if (initMethod) {
             this.callFunction(new PyMethod(initMethod, instance), args, kwargs);
@@ -3027,8 +3221,15 @@ export class Interpreter {
     } else if (target.type === 'Attribute') {
       const obj = this.execute(target.value);
       const result = obj.__setattr__(target.attr, value);
+      // Handle property setter
+      if (result && result.__property_set__) {
+        this.callFunction(
+          new PyMethod(result.setter, result.instance),
+          [result.value]
+        );
+      }
       // Handle user-defined __setattr__
-      if (result && result.__custom_setattr__) {
+      else if (result && result.__custom_setattr__) {
         this.callFunction(
           new PyMethod(result.method, result.instance),
           [new PyStr(result.name), result.value]
@@ -3132,7 +3333,15 @@ export class Interpreter {
       } else if (target.type === 'Attribute') {
         const obj = this.execute(target.value);
         const result = obj.__delattr__(target.attr);
-        if (result && result.__custom_delattr__) {
+        // Handle property deleter
+        if (result && result.__property_del__) {
+          this.callFunction(
+            new PyMethod(result.deleter, result.instance),
+            []
+          );
+        }
+        // Handle user-defined __delattr__
+        else if (result && result.__custom_delattr__) {
           this.callFunction(
             new PyMethod(result.method, result.instance),
             [new PyStr(result.name)]
@@ -4048,6 +4257,9 @@ export class Interpreter {
     this.currentScope = prevScope;
 
     const cls = new PyClass(node.name, bases, methods, classAttrs);
+
+    // Compute MRO eagerly to detect inconsistent inheritance at class creation time
+    cls.getMRO();
 
     // Apply decorators
     let result = cls;

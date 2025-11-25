@@ -64,6 +64,7 @@ export class PyInt extends PyObject {
     if (other instanceof PyInt) return new PyInt(this.value + other.value);
     if (other instanceof PyFloat) return new PyFloat(Number(this.value) + other.value);
     if (other instanceof PyBool) return new PyInt(this.value + (other.value ? 1n : 0n));
+    if (other.$type === 'complex') return other.__radd__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for +: 'int' and '${other.$type}'`);
   }
 
@@ -71,6 +72,7 @@ export class PyInt extends PyObject {
     if (other instanceof PyInt) return new PyInt(this.value - other.value);
     if (other instanceof PyFloat) return new PyFloat(Number(this.value) - other.value);
     if (other instanceof PyBool) return new PyInt(this.value - (other.value ? 1n : 0n));
+    if (other.$type === 'complex') return other.__rsub__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for -: 'int' and '${other.$type}'`);
   }
 
@@ -80,6 +82,7 @@ export class PyInt extends PyObject {
     if (other instanceof PyBool) return new PyInt(this.value * (other.value ? 1n : 0n));
     if (other instanceof PyStr) return other.__mul__(this);
     if (other instanceof PyList) return other.__mul__(this);
+    if (other.$type === 'complex') return other.__rmul__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for *: 'int' and '${other.$type}'`);
   }
 
@@ -276,6 +279,7 @@ export class PyFloat extends PyObject {
     if (other instanceof PyFloat) return new PyFloat(this.value + other.value);
     if (other instanceof PyInt) return new PyFloat(this.value + Number(other.value));
     if (other instanceof PyBool) return new PyFloat(this.value + (other.value ? 1 : 0));
+    if (other.$type === 'complex') return other.__radd__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for +: 'float' and '${other.$type}'`);
   }
 
@@ -283,6 +287,7 @@ export class PyFloat extends PyObject {
     if (other instanceof PyFloat) return new PyFloat(this.value - other.value);
     if (other instanceof PyInt) return new PyFloat(this.value - Number(other.value));
     if (other instanceof PyBool) return new PyFloat(this.value - (other.value ? 1 : 0));
+    if (other.$type === 'complex') return other.__rsub__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for -: 'float' and '${other.$type}'`);
   }
 
@@ -290,6 +295,7 @@ export class PyFloat extends PyObject {
     if (other instanceof PyFloat) return new PyFloat(this.value * other.value);
     if (other instanceof PyInt) return new PyFloat(this.value * Number(other.value));
     if (other instanceof PyBool) return new PyFloat(this.value * (other.value ? 1 : 0));
+    if (other.$type === 'complex') return other.__rmul__(this);
     throw new PyException('TypeError', `unsupported operand type(s) for *: 'float' and '${other.$type}'`);
   }
 
@@ -351,6 +357,139 @@ export class PyFloat extends PyObject {
   // Float methods
   is_integer() {
     return new PyBool(Number.isInteger(this.value));
+  }
+}
+
+// Python complex
+export class PyComplex extends PyObject {
+  constructor(real, imag = 0) {
+    super('complex');
+    this.real = Number(real);
+    this.imag = Number(imag);
+  }
+
+  toJS() {
+    return { real: this.real, imag: this.imag };
+  }
+
+  __str__() {
+    if (this.real === 0) {
+      return `${this.imag}j`;
+    }
+    const sign = this.imag >= 0 ? '+' : '';
+    return `(${this.real}${sign}${this.imag}j)`;
+  }
+
+  __repr__() {
+    return this.__str__();
+  }
+
+  __bool__() {
+    return this.real !== 0 || this.imag !== 0;
+  }
+
+  __eq__(other) {
+    if (other instanceof PyComplex) {
+      return this.real === other.real && this.imag === other.imag;
+    }
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      return this.imag === 0 && this.real === otherVal;
+    }
+    return false;
+  }
+
+  __add__(other) {
+    if (other instanceof PyComplex) {
+      return new PyComplex(this.real + other.real, this.imag + other.imag);
+    }
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      return new PyComplex(this.real + otherVal, this.imag);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for +: 'complex' and '${other.$type}'`);
+  }
+
+  __radd__(other) {
+    return this.__add__(other);
+  }
+
+  __sub__(other) {
+    if (other instanceof PyComplex) {
+      return new PyComplex(this.real - other.real, this.imag - other.imag);
+    }
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      return new PyComplex(this.real - otherVal, this.imag);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for -: 'complex' and '${other.$type}'`);
+  }
+
+  __rsub__(other) {
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      return new PyComplex(otherVal - this.real, -this.imag);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for -: '${other.$type}' and 'complex'`);
+  }
+
+  __mul__(other) {
+    if (other instanceof PyComplex) {
+      // (a+bi)(c+di) = (ac-bd) + (ad+bc)i
+      return new PyComplex(
+        this.real * other.real - this.imag * other.imag,
+        this.real * other.imag + this.imag * other.real
+      );
+    }
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      return new PyComplex(this.real * otherVal, this.imag * otherVal);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for *: 'complex' and '${other.$type}'`);
+  }
+
+  __rmul__(other) {
+    return this.__mul__(other);
+  }
+
+  __truediv__(other) {
+    if (other instanceof PyComplex) {
+      // (a+bi)/(c+di) = ((ac+bd) + (bc-ad)i) / (c²+d²)
+      const denom = other.real * other.real + other.imag * other.imag;
+      if (denom === 0) throw new PyException('ZeroDivisionError', 'complex division by zero');
+      return new PyComplex(
+        (this.real * other.real + this.imag * other.imag) / denom,
+        (this.imag * other.real - this.real * other.imag) / denom
+      );
+    }
+    if (other instanceof PyFloat || other instanceof PyInt) {
+      const otherVal = other instanceof PyInt ? Number(other.value) : other.value;
+      if (otherVal === 0) throw new PyException('ZeroDivisionError', 'complex division by zero');
+      return new PyComplex(this.real / otherVal, this.imag / otherVal);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for /: 'complex' and '${other.$type}'`);
+  }
+
+  __neg__() {
+    return new PyComplex(-this.real, -this.imag);
+  }
+
+  __pos__() {
+    return new PyComplex(this.real, this.imag);
+  }
+
+  __abs__() {
+    return new PyFloat(Math.sqrt(this.real * this.real + this.imag * this.imag));
+  }
+
+  conjugate() {
+    return new PyComplex(this.real, -this.imag);
+  }
+
+  __getattr__(name) {
+    if (name === 'real') return new PyFloat(this.real);
+    if (name === 'imag') return new PyFloat(this.imag);
+    throw new PyException('AttributeError', `'complex' object has no attribute '${name}'`);
   }
 }
 
