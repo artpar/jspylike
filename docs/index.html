@@ -296,7 +296,7 @@ print(f"Squares: {squares}")
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
     <script type="module">
         // Import jspylike from local bundle (also available via CDN)
-        import { Interpreter } from './lib/src/index.js';
+        import { Interpreter, PyBuiltin, PY_NONE } from './lib/src/index.js';
 
         const examples = {
             hello: `# Hello World
@@ -485,12 +485,23 @@ for square in squares_gen:
             try {
                 const interpreter = new Interpreter();
 
-                // Override print function
-                interpreter.globals.set('print', {
-                    $type: 'builtin_function_or_method',
-                    name: 'print',
-                    call: customPrint
-                });
+                // Override print function to capture output
+                interpreter.globalScope.set('print', new PyBuiltin('print', (...args) => {
+                    const line = args.map(arg => {
+                        // Handle Python objects with __str__ method
+                        if (arg && arg.__str__) return arg.__str__();
+                        // Handle Python objects with value property
+                        if (typeof arg === 'object' && arg !== null) {
+                            if (arg.toJS) return JSON.stringify(arg.toJS());
+                            if (arg.value !== undefined) return String(arg.value);
+                            return JSON.stringify(arg);
+                        }
+                        return String(arg);
+                    }).join(' ');
+                    outputLines.push({ type: 'output', text: line });
+                    updateOutput();
+                    return PY_NONE;
+                }, 0, Infinity));
 
                 addOutput('>>> Running code...', 'info');
 
