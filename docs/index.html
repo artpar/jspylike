@@ -217,6 +217,86 @@
             color: #60a5fa;
         }
 
+        .tabs {
+            display: flex;
+            gap: 0;
+        }
+
+        .tab-btn {
+            padding: 8px 16px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            color: #6b7280;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            border-radius: 0;
+        }
+
+        .tab-btn:hover {
+            color: #374151;
+            background: transparent;
+        }
+
+        .tab-btn.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .ast-content {
+            flex: 1;
+            padding: 16px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            overflow-y: auto;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            white-space: pre;
+        }
+
+        .ast-node {
+            margin-left: 16px;
+        }
+
+        .ast-key {
+            color: #9cdcfe;
+        }
+
+        .ast-string {
+            color: #ce9178;
+        }
+
+        .ast-number {
+            color: #b5cea8;
+        }
+
+        .ast-boolean {
+            color: #569cd6;
+        }
+
+        .ast-null {
+            color: #569cd6;
+        }
+
+        .ast-type {
+            color: #4ec9b0;
+            font-weight: bold;
+        }
+
         .loading {
             display: inline-block;
             width: 12px;
@@ -312,14 +392,24 @@ print(f"Squares: {squares}")
 
             <div class="output-section">
                 <div class="section-header">
-                    <h2>Console</h2>
+                    <div class="tabs">
+                        <button class="tab-btn active" data-tab="console">Console</button>
+                        <button class="tab-btn" data-tab="ast">AST</button>
+                    </div>
                     <div class="controls">
                         <button class="run-btn" id="runBtn">Run</button>
                         <button class="clear-btn" id="clearBtn">Clear</button>
                     </div>
                 </div>
-                <div class="output-content" id="output">
-                    <div class="output-info">Loading interpreter...</div>
+                <div class="tab-content active" id="console-tab">
+                    <div class="output-content" id="output">
+                        <div class="output-info">Loading interpreter...</div>
+                    </div>
+                </div>
+                <div class="tab-content" id="ast-tab">
+                    <div class="ast-content" id="ast-output">
+                        <span class="output-info">Parse the code to see the AST</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -334,7 +424,7 @@ print(f"Squares: {squares}")
 
         // Dynamic import with cache-busting query param
         const cacheBuster = Date.now();
-        const { Interpreter, PyBuiltin, PY_NONE } = await import(`${cdnBase}/index.js?v=${cacheBuster}`);
+        const { Interpreter, PyBuiltin, PY_NONE, Parser, Lexer } = await import(`${cdnBase}/index.js?v=${cacheBuster}`);
 
         const examples = {
             hello: `# Hello World
@@ -473,9 +563,23 @@ for square in squares_gen:
         });
 
         const output = document.getElementById('output');
+        const astOutput = document.getElementById('ast-output');
         const runBtn = document.getElementById('runBtn');
         const clearBtn = document.getElementById('clearBtn');
         const examplesSelect = document.getElementById('examples');
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        // Tab switching
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabId = btn.dataset.tab;
+                tabBtns.forEach(b => b.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(`${tabId}-tab`).classList.add('active');
+            });
+        });
 
         // Custom print function to capture output
         let outputLines = [];
@@ -485,6 +589,66 @@ for square in squares_gen:
             return JSON.stringify(obj, (key, value) =>
                 typeof value === 'bigint' ? Number(value) : value
             );
+        }
+
+        // Pretty print AST with syntax highlighting
+        function renderAST(node, indent = 0) {
+            const pad = '  '.repeat(indent);
+
+            if (node === null) {
+                return `<span class="ast-null">null</span>`;
+            }
+
+            if (typeof node === 'string') {
+                return `<span class="ast-string">"${escapeHtml(node)}"</span>`;
+            }
+
+            if (typeof node === 'number' || typeof node === 'bigint') {
+                return `<span class="ast-number">${node}</span>`;
+            }
+
+            if (typeof node === 'boolean') {
+                return `<span class="ast-boolean">${node}</span>`;
+            }
+
+            if (Array.isArray(node)) {
+                if (node.length === 0) return '[]';
+                const items = node.map(item => `${pad}  ${renderAST(item, indent + 1)}`).join(',\n');
+                return `[\n${items}\n${pad}]`;
+            }
+
+            if (typeof node === 'object') {
+                const keys = Object.keys(node);
+                if (keys.length === 0) return '{}';
+
+                const typeStr = node.type ? `<span class="ast-type">${escapeHtml(node.type)}</span>` : null;
+                const entries = keys
+                    .filter(k => k !== 'type')
+                    .map(key => {
+                        const val = renderAST(node[key], indent + 1);
+                        return `${pad}  <span class="ast-key">${escapeHtml(key)}</span>: ${val}`;
+                    });
+
+                if (typeStr) {
+                    entries.unshift(`${pad}  <span class="ast-key">type</span>: ${typeStr}`);
+                }
+
+                return `{\n${entries.join(',\n')}\n${pad}}`;
+            }
+
+            return String(node);
+        }
+
+        function updateAST(code) {
+            try {
+                const lexer = new Lexer(code);
+                const tokens = lexer.tokenize();
+                const parser = new Parser(tokens);
+                const ast = parser.parse();
+                astOutput.innerHTML = renderAST(ast);
+            } catch (error) {
+                astOutput.innerHTML = `<span class="output-error">${escapeHtml(error.message)}</span>`;
+            }
         }
 
         function customPrint(...args) {
@@ -526,6 +690,9 @@ for square in squares_gen:
             outputLines = [];
             runBtn.disabled = true;
             runBtn.innerHTML = 'Running<span class="loading"></span>';
+
+            // Update AST view
+            updateAST(code);
 
             try {
                 const interpreter = new Interpreter();
@@ -589,6 +756,7 @@ for square in squares_gen:
         function clearOutput() {
             outputLines = [];
             output.innerHTML = '<div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>';
+            astOutput.innerHTML = '<span class="output-info">Run the code to see the AST</span>';
         }
 
         // Event listeners
@@ -600,6 +768,7 @@ for square in squares_gen:
             if (example && examples[example]) {
                 editor.setValue(examples[example]);
                 clearOutput();
+                updateAST(examples[example]);
             }
             e.target.value = '';
         });
@@ -610,8 +779,9 @@ for square in squares_gen:
             'Cmd-Enter': runCode
         });
 
-        // Mark as ready
+        // Mark as ready and parse initial code
         output.innerHTML = '<div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>';
+        updateAST(editor.getValue());
     </script>
 </body>
 </html>
