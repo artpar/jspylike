@@ -244,6 +244,14 @@ export class GeneratorReturn extends PyException {
   }
 }
 
+// Stop async iteration signal
+export class StopAsyncIteration extends PyException {
+  constructor(value = null) {
+    super('StopAsyncIteration', '');
+    this.value = value;
+  }
+}
+
 // Exception hierarchy definition
 export const EXCEPTION_HIERARCHY = {
   'BaseException': null,

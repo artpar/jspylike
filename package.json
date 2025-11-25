@@ -1,6 +1,6 @@
 {
   "name": "jspylike",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A Python 3 interpreter written in JavaScript with 100% Python compliance",
   "main": "src/index.js",
   "type": "module",

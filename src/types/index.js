@@ -1,5 +1,5 @@
 // Export all Python types
-export { PyObject, PyException, StopIteration, GeneratorReturn } from './base.js';
+export { PyObject, PyException, StopIteration, StopAsyncIteration, GeneratorReturn } from './base.js';
 export { PyInt, PyFloat, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PyNotImplemented, PY_NOTIMPLEMENTED } from './primitives.js';
 export { PyStr } from './string.js';
 export { PyList, PyTuple, PyDict, PySet, PyFrozenSet } from './collections.js';
@@ -466,19 +466,78 @@ export class PyGenerator extends PyObject {
   }
 }
 
+// Python async generator
+export class PyAsyncGenerator extends PyObject {
+  constructor(func, args, interpreter) {
+    super('async_generator');
+    this.$type = 'async_generator';
+    this.func = func;
+    this.args = args;
+    this.interpreter = interpreter;
+    this.started = false;
+    this.finished = false;
+    this.state = null;
+    this.yieldedValues = [];
+    this.currentPromise = null;
+  }
+
+  __str__() {
+    return `<async_generator object ${this.func.name}>`;
+  }
+
+  __repr__() {
+    return this.__str__();
+  }
+
+  // Async iterator protocol
+  __aiter__() {
+    return this;
+  }
+
+  async __anext__() {
+    if (this.finished) {
+      throw new StopAsyncIteration();
+    }
+    // This will be implemented by the interpreter
+    throw new PyException('RuntimeError', 'Async generator iteration not implemented');
+  }
+
+  async asend(value) {
+    // Send a value into the async generator
+    // Implemented by interpreter
+    throw new PyException('RuntimeError', 'Async generator send not implemented');
+  }
+
+  async athrow(exc) {
+    // Throw an exception into the async generator
+    // Implemented by interpreter
+    throw new PyException('RuntimeError', 'Async generator throw not implemented');
+  }
+
+  async aclose() {
+    // Close the async generator
+    this.finished = true;
+    return PY_NONE;
+  }
+}
+
 // Python coroutine (async function)
 export class PyCoroutine extends PyObject {
-  constructor(func, args, interpreter) {
+  constructor(func, args, interpreter, currentClass = null, currentSelf = null, kwargs = {}) {
     super('coroutine');
     this.$type = 'coroutine';  // Ensure $type is set
     this.func = func;
     this.args = args;
+    this.kwargs = kwargs;
     this.interpreter = interpreter;
     this.started = false;
     this.finished = false;
     this.promise = null;
     this.result = null;
     this.exception = null;
+    // Store context for super() support
+    this.savedClass = currentClass;
+    this.savedSelf = currentSelf;
   }
 
   __str__() {
@@ -505,9 +564,17 @@ export class PyCoroutine extends PyObject {
     }
     this.started = true;
 
+    // Restore saved context for super() support
+    const prevClass = this.interpreter.currentClass;
+    const prevSelf = this.interpreter.currentSelf;
+    if (this.savedClass !== null) {
+      this.interpreter.currentClass = this.savedClass;
+      this.interpreter.currentSelf = this.savedSelf;
+    }
+
     try {
       // Execute the async function through the interpreter
-      const result = await this.interpreter.callFunctionAsync(this.func, this.args);
+      const result = await this.interpreter.callFunctionAsync(this.func, this.args, this.kwargs);
       this.finished = true;
       this.result = result;
       return result;
@@ -515,6 +582,10 @@ export class PyCoroutine extends PyObject {
       this.finished = true;
       this.exception = error;
       throw error;
+    } finally {
+      // Restore previous context
+      this.interpreter.currentClass = prevClass;
+      this.interpreter.currentSelf = prevSelf;
     }
   }
 

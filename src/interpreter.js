@@ -1,10 +1,10 @@
 import { Parser } from './parser.js';
 import {
-  PyObject, PyException, StopIteration, GeneratorReturn,
+  PyObject, PyException, StopIteration, StopAsyncIteration, GeneratorReturn,
   PyInt, PyFloat, PyBool, PyNone, PY_NONE, PY_TRUE, PY_FALSE, PY_NOTIMPLEMENTED,
   PyStr, PyList, PyTuple, PyDict, PySet, PyFrozenSet,
   PyFunction, PyMethod, PyClass, PyInstance, PyBuiltin, PySuper, PyProperty,
-  PyClassMethod, PyStaticMethod, PyCoroutine,
+  PyClassMethod, PyStaticMethod, PyCoroutine, PyAsyncGenerator,
   PyRange, PyEnumerate, PyZip, PyMap, PyFilter, PySlice,
   toPy
 } from './types/index.js';
@@ -131,6 +131,13 @@ class ContinueLoop extends Error {
   }
 }
 
+class YieldValue extends Error {
+  constructor(value) {
+    super('yield');
+    this.value = value;
+  }
+}
+
 export class Interpreter {
   constructor() {
     this.globalScope = new Scope(null, 'global');
@@ -205,6 +212,49 @@ export class Interpreter {
       if (this.nodeContainsYield(stmt)) return true;
     }
     return false;
+  }
+
+  bodyContainsAwait(stmts) {
+    for (const stmt of stmts) {
+      if (this.stmtContainsAwait(stmt)) return true;
+    }
+    return false;
+  }
+
+  stmtContainsAwait(node) {
+    if (!node) return false;
+    if (node.type === 'Await') return true;
+
+    // Check children based on node type
+    switch (node.type) {
+      case 'If':
+        return this.nodeContainsAwait(node.test) ||
+               this.bodyContainsAwait(node.body) ||
+               this.bodyContainsAwait(node.orelse);
+      case 'For':
+      case 'While':
+        return this.nodeContainsAwait(node.test || node.iter) ||
+               this.bodyContainsAwait(node.body) ||
+               this.bodyContainsAwait(node.orelse || []);
+      case 'Try':
+        return this.bodyContainsAwait(node.body) ||
+               this.bodyContainsAwait(node.orelse || []) ||
+               this.bodyContainsAwait(node.finalbody || []) ||
+               node.handlers?.some(h => this.bodyContainsAwait(h.body));
+      case 'With':
+        return this.bodyContainsAwait(node.body);
+      case 'ExpressionStmt':
+        return this.nodeContainsAwait(node.value || node.expression);
+      case 'Return':
+        return this.nodeContainsAwait(node.value);
+      case 'Assign':
+        return this.nodeContainsAwait(node.value);
+      case 'FunctionDef':
+        // Don't check inside nested function definitions
+        return false;
+      default:
+        return false;
+    }
   }
 
   // Find all variables that are assigned to in the function body
@@ -395,6 +445,43 @@ export class Interpreter {
         return this.nodeContainsYield(node.value);
       case 'Assign':
         return this.nodeContainsYield(node.value);
+      default:
+        return false;
+    }
+  }
+
+  nodeContainsAwait(node) {
+    if (!node) return false;
+    if (node.type === 'Await') return true;
+
+    // Recursively check all child nodes
+    switch (node.type) {
+      case 'BinaryOp':
+        return this.nodeContainsAwait(node.left) || this.nodeContainsAwait(node.right);
+      case 'UnaryOp':
+        return this.nodeContainsAwait(node.operand);
+      case 'CompareOp':
+        return this.nodeContainsAwait(node.left) || node.comparators?.some(c => this.nodeContainsAwait(c));
+      case 'Call':
+        return this.nodeContainsAwait(node.func) || node.args?.some(a => this.nodeContainsAwait(a));
+      case 'Attribute':
+        return this.nodeContainsAwait(node.value);
+      case 'Subscript':
+        return this.nodeContainsAwait(node.value) || this.nodeContainsAwait(node.slice);
+      case 'List':
+      case 'Tuple':
+      case 'Set':
+        return node.elements?.some(e => this.nodeContainsAwait(e));
+      case 'Dict':
+        return node.keys?.some(k => this.nodeContainsAwait(k)) || node.values?.some(v => this.nodeContainsAwait(v));
+      case 'IfExp':
+        return this.nodeContainsAwait(node.test) || this.nodeContainsAwait(node.body) || this.nodeContainsAwait(node.orelse);
+      case 'Assign':
+        return this.nodeContainsAwait(node.value);
+      case 'ExpressionStmt':
+        return this.nodeContainsAwait(node.value);
+      case 'Return':
+        return this.nodeContainsAwait(node.value);
       default:
         return false;
     }
@@ -1239,6 +1326,11 @@ export class Interpreter {
 
   // Expressions
   visitBinaryOp(node) {
+    // Check if we're in async context and expression contains await
+    if (this.inAsyncContext && (this.nodeContainsAwait(node.left) || this.nodeContainsAwait(node.right))) {
+      return this.visitBinaryOpAsync(node);
+    }
+
     const left = this.execute(node.left);
     const right = this.execute(node.right);
 
@@ -1292,6 +1384,84 @@ export class Interpreter {
       const method = right.cls.methods[rightMethod] || this._getInheritedMethod(right.cls, rightMethod);
       if (method) {
         const result = this.callFunction(new PyMethod(method, right), [left]);
+        if (result !== PY_NOTIMPLEMENTED) {
+          return result;
+        }
+      }
+    } else if (typeof right[rightMethod] === 'function') {
+      // Try builtin reflected method on right (only if not PyInstance)
+      try {
+        const result = right[rightMethod](left);
+        if (result !== PY_NOTIMPLEMENTED) {
+          return result;
+        }
+      } catch (e) {
+        // Reflected method failed
+      }
+    }
+
+    // Fall back to original left method (will throw appropriate error)
+    if (typeof left[leftMethod] === 'function') {
+      return left[leftMethod](right);
+    }
+    throw new PyException('TypeError', `unsupported operand type(s) for ${methods[0].replace(/__/g, '')}: '${left.$type}' and '${right.$type}'`);
+  }
+
+  // Async version of binary operation for expressions with await
+  async visitBinaryOpAsync(node) {
+    const left = await this.executeAsync(node.left);
+    const right = await this.executeAsync(node.right);
+
+    // Operator to method name mapping
+    const opMap = {
+      '+': ['__add__', '__radd__'],
+      '-': ['__sub__', '__rsub__'],
+      '*': ['__mul__', '__rmul__'],
+      '/': ['__truediv__', '__rtruediv__'],
+      '//': ['__floordiv__', '__rfloordiv__'],
+      '%': ['__mod__', '__rmod__'],
+      '**': ['__pow__', '__rpow__'],
+      '&': ['__and__', '__rand__'],
+      '|': ['__or__', '__ror__'],
+      '^': ['__xor__', '__rxor__'],
+      '<<': ['__lshift__', '__rlshift__'],
+      '>>': ['__rshift__', '__rrshift__'],
+      '@': ['__matmul__', '__rmatmul__']
+    };
+
+    const methods = opMap[node.operator];
+    if (!methods) {
+      throw new PyException('RuntimeError', `Unknown operator: ${node.operator}`);
+    }
+
+    const [leftMethod, rightMethod] = methods;
+
+    // Try left operand's method first
+    if (left instanceof PyInstance) {
+      const method = left.cls.methods[leftMethod] || this._getInheritedMethod(left.cls, leftMethod);
+      if (method) {
+        const result = await this.callFunctionAsync(new PyMethod(method, left), [right]);
+        if (result !== PY_NOTIMPLEMENTED) {
+          return result;
+        }
+      }
+    } else if (typeof left[leftMethod] === 'function') {
+      // Try builtin method on left (only if not PyInstance)
+      try {
+        const result = left[leftMethod](right);
+        if (result !== PY_NOTIMPLEMENTED) {
+          return result;
+        }
+      } catch (e) {
+        // Builtin method failed, try reflected
+      }
+    }
+
+    // Try right operand's reflected method
+    if (right instanceof PyInstance) {
+      const method = right.cls.methods[rightMethod] || this._getInheritedMethod(right.cls, rightMethod);
+      if (method) {
+        const result = await this.callFunctionAsync(new PyMethod(method, right), [left]);
         if (result !== PY_NOTIMPLEMENTED) {
           return result;
         }
@@ -1369,7 +1539,121 @@ export class Interpreter {
     return items;
   }
 
+  // Async iterator protocol methods
+
+  // Helper to get async iterator from an object (handles __aiter__ and fallback to __iter__)
+  async _getAsyncIterator(obj) {
+    // Check for __aiter__ on PyInstance
+    if (obj instanceof PyInstance) {
+      const method = obj.cls.methods['__aiter__'] || this._getInheritedMethod(obj.cls, '__aiter__');
+      if (method) {
+        return await this.callFunctionAsync(new PyMethod(method, obj), []);
+      }
+      // Fall back to regular iterator
+      const iterMethod = obj.cls.methods['__iter__'] || this._getInheritedMethod(obj.cls, '__iter__');
+      if (iterMethod) {
+        const iter = this.callFunction(new PyMethod(iterMethod, obj), []);
+        return this._wrapSyncIterator(iter);
+      }
+    }
+
+    // Check for __aiter__ method
+    if (typeof obj.__aiter__ === 'function') {
+      return await obj.__aiter__();
+    }
+
+    // Fall back to regular __iter__ if available
+    if (typeof obj.__iter__ === 'function') {
+      return this._wrapSyncIterator(obj.__iter__());
+    }
+
+    throw new PyException('TypeError', `'${obj.$type}' object is not an async iterable`);
+  }
+
+  // Helper to get next value from async iterator (handles __anext__ and fallback to __next__)
+  async _getAsyncNext(iter) {
+    // Check for __anext__ on PyInstance
+    if (iter instanceof PyInstance) {
+      const method = iter.cls.methods['__anext__'] || this._getInheritedMethod(iter.cls, '__anext__');
+      if (method) {
+        try {
+          return await this.callFunctionAsync(new PyMethod(method, iter), []);
+        } catch (e) {
+          // Convert StopAsyncIteration to stop iteration
+          if (e instanceof StopAsyncIteration || e.pyType === 'StopAsyncIteration') {
+            throw new StopAsyncIteration(e.value);
+          }
+          throw e;
+        }
+      }
+      // Fall back to regular __next__
+      const nextMethod = iter.cls.methods['__next__'] || this._getInheritedMethod(iter.cls, '__next__');
+      if (nextMethod) {
+        try {
+          return this.callFunction(new PyMethod(nextMethod, iter), []);
+        } catch (e) {
+          // Convert StopIteration to StopAsyncIteration
+          if (e instanceof StopIteration || e.pyType === 'StopIteration') {
+            throw new StopAsyncIteration(e.value);
+          }
+          throw e;
+        }
+      }
+    }
+
+    // Check for __anext__ method
+    if (typeof iter.__anext__ === 'function') {
+      return await iter.__anext__();
+    }
+
+    // Fall back to regular __next__ if available
+    if (typeof iter.__next__ === 'function') {
+      try {
+        return iter.__next__();
+      } catch (e) {
+        // Convert StopIteration to StopAsyncIteration
+        if (e instanceof StopIteration || e.pyType === 'StopIteration') {
+          throw new StopAsyncIteration(e.value);
+        }
+        throw e;
+      }
+    }
+
+    throw new PyException('TypeError', `'${iter.$type}' object is not an async iterator`);
+  }
+
+  // Helper to wrap a sync iterator for use in async context
+  _wrapSyncIterator(iter) {
+    return {
+      $type: 'async_iterator_wrapper',
+      _syncIter: iter,
+      async __anext__() {
+        try {
+          // Use the sync iterator's __next__ method
+          if (typeof this._syncIter.__next__ === 'function') {
+            return this._syncIter.__next__();
+          }
+          throw new PyException('TypeError', 'Wrapped object is not an iterator');
+        } catch (e) {
+          // Convert StopIteration to StopAsyncIteration
+          if (e instanceof StopIteration || e.pyType === 'StopIteration') {
+            throw new StopAsyncIteration(e.value);
+          }
+          throw e;
+        }
+      },
+      __aiter__() {
+        return this;
+      }
+    };
+  }
+
   visitUnaryOp(node) {
+    // Check if we're in async context and expression contains await
+    if (this.inAsyncContext && this.nodeContainsAwait(node.operand)) {
+      return this.visitUnaryOpAsync(node);
+    }
+
     const operand = this.execute(node.operand);
 
     const opMap = {
@@ -1399,6 +1683,37 @@ export class Interpreter {
     return operand[methodName]();
   }
 
+  // Async version of unary operation
+  async visitUnaryOpAsync(node) {
+    const operand = await this.executeAsync(node.operand);
+
+    const opMap = {
+      '-': '__neg__',
+      '+': '__pos__',
+      '~': '__invert__'
+    };
+
+    if (node.operator === 'not') {
+      return this._toBool(operand) ? PY_FALSE : PY_TRUE;
+    }
+
+    const methodName = opMap[node.operator];
+    if (!methodName) {
+      throw new PyException('RuntimeError', `Unknown unary operator: ${node.operator}`);
+    }
+
+    // Check for custom magic method on PyInstance
+    if (operand instanceof PyInstance) {
+      const method = operand.cls.methods[methodName] || this._getInheritedMethod(operand.cls, methodName);
+      if (method) {
+        return await this.callFunctionAsync(new PyMethod(method, operand), []);
+      }
+    }
+
+    // Fall back to builtin method
+    return operand[methodName]();
+  }
+
   visitYield(node) {
     // Yield should be handled by generator execution, not normal interpretation
     throw new PyException('SyntaxError', "'yield' outside function");
@@ -1410,6 +1725,11 @@ export class Interpreter {
   }
 
   visitCompareOp(node) {
+    // Check if we're in async context and expression contains await
+    if (this.inAsyncContext && (this.nodeContainsAwait(node.left) || node.comparators?.some(c => this.nodeContainsAwait(c)))) {
+      return this.visitCompareOpAsync(node);
+    }
+
     let left = this.execute(node.left);
 
     const opMap = {
@@ -1492,6 +1812,86 @@ export class Interpreter {
     return PY_TRUE;
   }
 
+  // Async version of comparison operation
+  async visitCompareOpAsync(node) {
+    let left = await this.executeAsync(node.left);
+
+    const opMap = {
+      '<': '__lt__',
+      '>': '__gt__',
+      '<=': '__le__',
+      '>=': '__ge__',
+      '==': '__eq__',
+      '!=': '__ne__'
+    };
+
+    for (let i = 0; i < node.ops.length; i++) {
+      const op = node.ops[i];
+      const right = await this.executeAsync(node.comparators[i]);
+      let result;
+
+      // Handle special operators
+      if (op === 'in') {
+        // Check for custom __contains__ on right
+        if (right instanceof PyInstance) {
+          const method = right.cls.methods['__contains__'] || this._getInheritedMethod(right.cls, '__contains__');
+          if (method) {
+            result = await this.callFunctionAsync(new PyMethod(method, right), [left]);
+            result = this._toBool(result);
+          } else {
+            result = right.__contains__(left);
+          }
+        } else {
+          result = right.__contains__(left);
+        }
+      } else if (op === 'not in') {
+        if (right instanceof PyInstance) {
+          const method = right.cls.methods['__contains__'] || this._getInheritedMethod(right.cls, '__contains__');
+          if (method) {
+            result = await this.callFunctionAsync(new PyMethod(method, right), [left]);
+            result = !this._toBool(result);
+          } else {
+            result = !right.__contains__(left);
+          }
+        } else {
+          result = !right.__contains__(left);
+        }
+      } else if (op === 'is') {
+        result = (left === right);
+      } else if (op === 'is not') {
+        result = (left !== right);
+      } else {
+        // Standard comparison operators
+        const methodName = opMap[op];
+        if (!methodName) {
+          throw new PyException('RuntimeError', `Unknown comparison operator: ${op}`);
+        }
+
+        // Try custom magic method on PyInstance
+        if (left instanceof PyInstance) {
+          const method = left.cls.methods[methodName] || this._getInheritedMethod(left.cls, methodName);
+          if (method) {
+            result = await this.callFunctionAsync(new PyMethod(method, left), [right]);
+            result = this._toBool(result);
+          } else if (typeof left[methodName] === 'function') {
+            result = left[methodName](right);
+          } else {
+            throw new PyException('TypeError', `'${op}' not supported between instances of '${left.$type}' and '${right.$type}'`);
+          }
+        } else if (typeof left[methodName] === 'function') {
+          result = left[methodName](right);
+        } else {
+          throw new PyException('TypeError', `'${op}' not supported between instances of '${left.$type}' and '${right.$type}'`);
+        }
+      }
+
+      if (!result) return PY_FALSE;
+      left = right;
+    }
+
+    return PY_TRUE;
+  }
+
   visitBoolOp(node) {
     if (node.operator === 'and') {
       let result;
@@ -1550,6 +1950,19 @@ export class Interpreter {
   }
 
   visitCall(node) {
+    // Check if we're in async context and any argument/kwarg contains await
+    if (this.inAsyncContext) {
+      const hasAwaitInArgs = node.args.some(arg =>
+        arg.type === 'Starred' ? this.nodeContainsAwait(arg.value) : this.nodeContainsAwait(arg)
+      );
+      const hasAwaitInKwargs = node.keywords.some(kw => this.nodeContainsAwait(kw.value));
+      const hasAwaitInFunc = this.nodeContainsAwait(node.func);
+
+      if (hasAwaitInArgs || hasAwaitInKwargs || hasAwaitInFunc) {
+        return this.visitCallAsync(node);
+      }
+    }
+
     const func = this.execute(node.func);
     const args = node.args.map(arg => {
       if (arg.type === 'Starred') {
@@ -1588,6 +2001,49 @@ export class Interpreter {
     }
 
     return this.callFunction(func, expandedArgs, kwargs);
+  }
+
+  async visitCallAsync(node) {
+    const func = await this.executeAsync(node.func);
+    const args = [];
+    for (const arg of node.args) {
+      if (arg.type === 'Starred') {
+        args.push({ starred: true, value: await this.executeAsync(arg.value) });
+      } else {
+        args.push(await this.executeAsync(arg));
+      }
+    }
+
+    // Expand starred args
+    const expandedArgs = [];
+    for (const arg of args) {
+      if (arg.starred) {
+        const iter = arg.value.__iter__();
+        try {
+          while (true) expandedArgs.push(iter.__next__());
+        } catch (e) {
+          if (!(e instanceof StopIteration) && e.pyType !== 'StopIteration') throw e;
+        }
+      } else {
+        expandedArgs.push(arg);
+      }
+    }
+
+    // Process keyword arguments
+    const kwargs = {};
+    for (const kw of node.keywords) {
+      if (kw.name === null) {
+        // **kwargs
+        const dict = await this.executeAsync(kw.value);
+        for (const { key, value } of dict.map.values()) {
+          kwargs[key.value] = value;
+        }
+      } else {
+        kwargs[kw.name] = await this.executeAsync(kw.value);
+      }
+    }
+
+    return await this.callFunctionAsync(func, expandedArgs, kwargs);
   }
 
   callFunction(func, args, kwargs = {}) {
@@ -1647,13 +2103,19 @@ export class Interpreter {
     }
 
     if (func instanceof PyFunction) {
-      // Handle async functions
-      if (func.isAsync) {
-        // Create and return a coroutine object
-        return new PyCoroutine(func, args, this);
+      // Handle async generator functions (both async AND generator)
+      if (func.isAsync && func.isGenerator) {
+        // Create and return an async generator object
+        return this.createAsyncGenerator(func, args, kwargs);
       }
 
-      // Handle generator functions
+      // Handle async functions (async but not generator)
+      if (func.isAsync) {
+        // Create and return a coroutine object with saved context for super() support
+        return new PyCoroutine(func, args, this, this.currentClass, this.currentSelf, kwargs);
+      }
+
+      // Handle generator functions (generator but not async)
       if (func.isGenerator) {
         // Create and return a generator object
         return this.createGenerator(func, args, kwargs);
@@ -1741,13 +2203,28 @@ export class Interpreter {
   async callFunctionAsync(func, args = [], kwargs = {}) {
     // Handle PyMethod (bound method)
     if (func instanceof PyMethod) {
-      // Add instance as first argument
-      args = [func.instance, ...args];
-      func = func.func;
+      // Set context for super()
+      const prevClass = this.currentClass;
+      const prevSelf = this.currentSelf;
+      // Use definingClass so super() looks at the right class
+      this.currentClass = func.definingClass || func.instance.cls;
+      this.currentSelf = func.instance;
+      try {
+        return await this.callFunctionAsync(func.func, [func.instance, ...args], kwargs);
+      } finally {
+        this.currentClass = prevClass;
+        this.currentSelf = prevSelf;
+      }
     }
 
     // Handle PyFunction (async function)
     if (func instanceof PyFunction && func.isAsync) {
+      // Check if it's an async generator
+      if (func.isGenerator) {
+        // Create and return an async generator object
+        return this.createAsyncGenerator(func, args, kwargs);
+      }
+
       // Create new scope
       const prevScope = this.currentScope;
       const prevAsyncContext = this.inAsyncContext;
@@ -1946,6 +2423,230 @@ export class Interpreter {
     };
 
     return generator;
+  }
+
+  // Create an async generator object for an async generator function
+  createAsyncGenerator(func, args, kwargs) {
+    const asyncGen = new PyAsyncGenerator(func, args, this);
+
+    // Store the kwargs for later use
+    asyncGen.kwargs = kwargs;
+    asyncGen.values = [];
+    asyncGen.index = 0;
+    asyncGen.initialized = false;
+    asyncGen.pendingException = null; // Store exception raised during collection
+
+    // Override __anext__ method with actual implementation
+    asyncGen.__anext__ = async () => {
+      // Initialize on first call (collect all values eagerly)
+      if (!asyncGen.initialized) {
+        asyncGen.initialized = true;
+        await this._collectAsyncGenValues(asyncGen);
+      }
+
+      // If we have values to return, return them first
+      if (asyncGen.index < asyncGen.values.length) {
+        return asyncGen.values[asyncGen.index++];
+      }
+
+      // All values returned, now check for pending exception
+      if (asyncGen.pendingException) {
+        throw asyncGen.pendingException;
+      }
+
+      // No more values and no exception
+      throw new StopAsyncIteration();
+    };
+
+    return asyncGen;
+  }
+
+  // Eagerly collect all yielded values from async generator
+  async _collectAsyncGenValues(asyncGen) {
+    const prevScope = this.currentScope;
+    const prevAsyncContext = this.inAsyncContext;
+    this.currentScope = new Scope(asyncGen.func.closure);
+    this.inAsyncContext = true;
+
+    // Store reference to values array in asyncGen for _executeAsyncGeneratorStmt to use
+    asyncGen.collectingValues = true;
+
+    try {
+      // Analyze function body to find local variables
+      const localVars = this.findLocalVariables(asyncGen.func.body);
+      for (const varName of localVars) {
+        this.currentScope.localVars.add(varName);
+      }
+
+      // Bind parameters
+      this.bindParameters(asyncGen.func, asyncGen.args, asyncGen.kwargs || {});
+
+      // Execute and collect yields
+      await this._executeAsyncGenBody(asyncGen, asyncGen.func.body);
+
+    } catch (e) {
+      if (e instanceof ReturnValue || e instanceof GeneratorReturn) {
+        // Generator return ends iteration
+      } else if (e instanceof StopAsyncIteration) {
+        // Normal end of async iteration
+      } else {
+        // Store exception to be raised after all yielded values are returned
+        asyncGen.pendingException = e;
+      }
+    } finally {
+      this.currentScope = prevScope;
+      this.inAsyncContext = prevAsyncContext;
+      asyncGen.collectingValues = false;
+    }
+  }
+
+  // Execute async generator statement and handle yields
+  async _executeAsyncGeneratorStmt(asyncGen, stmt) {
+    // Handle expression statements with yield
+    if (stmt.type === 'ExpressionStmt' || stmt.type === 'ExpressionStatement') {
+      const expr = stmt.expression;
+      if (expr.type === 'Yield') {
+        const value = expr.value ? await this.executeAsync(expr.value) : PY_NONE;
+        asyncGen.values.push(value);
+        return;
+      }
+      if (expr.type === 'YieldFrom') {
+        // Handle yield from
+        const iterable = await this.executeAsync(expr.value);
+        const iterator = await this._getAsyncIterator(iterable);
+
+        try {
+          while (true) {
+            const value = await this._getAsyncNext(iterator);
+            asyncGen.values.push(value);
+          }
+        } catch (e) {
+          if (e instanceof StopAsyncIteration) {
+            return; // Continue to next statement
+          }
+          throw e;
+        }
+      }
+
+      // Regular expression
+      await this.executeAsync(stmt);
+      return;
+    }
+
+    // Handle return statement
+    if (stmt.type === 'Return') {
+      if (stmt.value) {
+        throw new GeneratorReturn(await this.executeAsync(stmt.value));
+      }
+      throw new GeneratorReturn(PY_NONE);
+    }
+
+    // Handle if statement
+    if (stmt.type === 'If') {
+      const condition = await this.executeAsync(stmt.test || stmt.condition);
+      if (this._toBool(condition)) {
+        await this._executeAsyncGenBody(asyncGen, stmt.body);
+      } else if (stmt.orelse) {
+        await this._executeAsyncGenBody(asyncGen, stmt.orelse);
+      }
+      return;
+    }
+
+    // Handle for loop
+    if (stmt.type === 'For') {
+      const iterable = await this.executeAsync(stmt.iter);
+      const iterator = await this._getAsyncIterator(iterable);
+
+      try {
+        while (true) {
+          const value = await this._getAsyncNext(iterator);
+          this.assignTarget(stmt.target, value);
+          try {
+            await this._executeAsyncGenBody(asyncGen, stmt.body);
+          } catch (e) {
+            if (e instanceof BreakLoop) break;
+            if (e instanceof ContinueLoop) continue;
+            throw e;
+          }
+        }
+      } catch (e) {
+        if (!(e instanceof StopIteration) && !(e instanceof StopAsyncIteration)) {
+          throw e;
+        }
+      }
+
+      // Execute else clause if no break occurred
+      if (stmt.orelse && stmt.orelse.length > 0) {
+        await this._executeAsyncGenBody(asyncGen, stmt.orelse);
+      }
+      return;
+    }
+
+    // Handle while loop
+    if (stmt.type === 'While') {
+      while (this._toBool(await this.executeAsync(stmt.test || stmt.condition))) {
+        try {
+          await this._executeAsyncGenBody(asyncGen, stmt.body);
+        } catch (e) {
+          if (e instanceof BreakLoop) break;
+          if (e instanceof ContinueLoop) continue;
+          throw e;
+        }
+      }
+
+      // Execute else clause if no break occurred
+      if (stmt.orelse && stmt.orelse.length > 0) {
+        await this._executeAsyncGenBody(asyncGen, stmt.orelse);
+      }
+      return;
+    }
+
+    // Handle try/except
+    if (stmt.type === 'Try') {
+      try {
+        await this._executeAsyncGenBody(asyncGen, stmt.body);
+      } catch (e) {
+        let handled = false;
+        if (stmt.handlers) {
+          for (const handler of stmt.handlers) {
+            if (this._matchesException(e, handler)) {
+              if (handler.name) {
+                this.currentScope.set(handler.name, this._toPyException(e));
+              }
+              await this._executeAsyncGenBody(asyncGen, handler.body);
+              handled = true;
+              break;
+            }
+          }
+        }
+
+        if (!handled) {
+          throw e;
+        }
+      } finally {
+        if (stmt.finalbody) {
+          await this._executeAsyncGenBody(asyncGen, stmt.finalbody);
+        }
+      }
+      return;
+    }
+
+    // Handle assign
+    if (stmt.type === 'Assign') {
+      const value = await this.executeAsync(stmt.value);
+      this.assignTarget(stmt.targets[0], value);
+      return;
+    }
+
+    // For other statements, execute normally
+    await this.executeAsync(stmt);
+  }
+
+  // Execute body of async generator (list of statements)
+  async _executeAsyncGenBody(asyncGen, stmts) {
+    for (const stmt of stmts) {
+      await this._executeAsyncGeneratorStmt(asyncGen, stmt);
+    }
   }
 
   bindParameters(func, args, kwargs) {
@@ -2455,7 +3156,16 @@ export class Interpreter {
   }
 
   visitReturn(node) {
+    // If in async context, return a promise
+    if (this.inAsyncContext) {
+      return this.visitReturnAsync(node);
+    }
     const value = node.value ? this.execute(node.value) : PY_NONE;
+    throw new ReturnValue(value);
+  }
+
+  async visitReturnAsync(node) {
+    const value = node.value ? await this.executeAsync(node.value) : PY_NONE;
     throw new ReturnValue(value);
   }
 
@@ -2602,6 +3312,11 @@ export class Interpreter {
 
   // Control flow
   visitIf(node) {
+    // If in async context, use async version
+    if (this.inAsyncContext) {
+      return this.visitIfAsync(node);
+    }
+
     const test = this.execute(node.test);
 
     if (this._toBool(test)) {
@@ -2617,7 +3332,70 @@ export class Interpreter {
     return PY_NONE;
   }
 
+  async visitIfAsync(node) {
+    const test = await this.executeAsync(node.test);
+
+    if (this._toBool(test)) {
+      for (const stmt of node.body) {
+        await this.executeAsync(stmt);
+      }
+    } else {
+      for (const stmt of node.orelse) {
+        await this.executeAsync(stmt);
+      }
+    }
+
+    return PY_NONE;
+  }
+
+  // Regular for loop in async context (uses sync iterator but async body execution)
+  async _visitForInAsyncContext(node) {
+    // Get the iterable (synchronously)
+    const iterable = await this.executeAsync(node.iter);
+    const iter = this._getIterator(iterable);
+    let brokeOut = false;
+
+    try {
+      while (true) {
+        // Get next value synchronously
+        const value = this._getNext(iter);
+        this.assignTarget(node.target, value);
+
+        try {
+          // Execute body statements asynchronously (they may contain await)
+          for (const stmt of node.body) {
+            await this.executeAsync(stmt);
+          }
+        } catch (e) {
+          if (e instanceof BreakLoop) {
+            brokeOut = true;
+            break;
+          }
+          if (e instanceof ContinueLoop) continue;
+          throw e;
+        }
+      }
+    } catch (e) {
+      // Check for StopIteration to end the loop
+      if (!(e instanceof StopIteration) && e.pyType !== 'StopIteration') throw e;
+    }
+
+    // Execute else clause if no break
+    if (!brokeOut) {
+      for (const stmt of node.orelse) {
+        await this.executeAsync(stmt);
+      }
+    }
+
+    return PY_NONE;
+  }
+
   visitWhile(node) {
+    // If in async context, use async version to handle potential await expressions
+    if (this.inAsyncContext) {
+      return this.visitWhileAsync(node);
+    }
+
     let brokeOut = false;
     while (this._toBool(this.execute(node.test))) {
       try {
@@ -2644,7 +3422,54 @@ export class Interpreter {
     return PY_NONE;
   }
 
+  // Async version of while loop
+  async visitWhileAsync(node) {
+    let brokeOut = false;
+
+    // Evaluate test condition asynchronously
+    while (this._toBool(await this.executeAsync(node.test))) {
+      try {
+        // Execute body statements asynchronously
+        for (const stmt of node.body) {
+          await this.executeAsync(stmt);
+        }
+      } catch (e) {
+        if (e instanceof BreakLoop) {
+          brokeOut = true;
+          break;
+        }
+        if (e instanceof ContinueLoop) continue;
+        throw e;
+      }
+    }
+
+    // Execute else clause only if no break occurred
+    if (!brokeOut) {
+      for (const stmt of node.orelse) {
+        await this.executeAsync(stmt);
+      }
+    }
+
+    return PY_NONE;
+  }
+
   visitFor(node) {
+    // Check if this is an async for loop
+    if (node.isAsync) {
+      // In async context, use async version
+      if (this.inAsyncContext) {
+        return this.visitForAsync(node);
+      }
+      // Async for outside async function is an error
+      throw new PyException('SyntaxError', "'async for' outside async function");
+    }
+
+    // Regular for loop - if in async context, return promise
+    if (this.inAsyncContext) {
+      return this._visitForInAsyncContext(node);
+    }
+
+    // Synchronous for loop
     const iterable = this.execute(node.iter);
     const iter = this._getIterator(iterable);
     let brokeOut = false;
@@ -2675,6 +3500,48 @@ export class Interpreter {
     if (!brokeOut) {
       for (const stmt of node.orelse) {
         this.execute(stmt);
+      }
+    }
+
+    return PY_NONE;
+  }
+
+  // Async version of for loop
+  async visitForAsync(node) {
+    // Get the async iterable
+    const iterable = await this.executeAsync(node.iter);
+    const iter = await this._getAsyncIterator(iterable);
+    let brokeOut = false;
+
+    try {
+      while (true) {
+        // Get next value asynchronously
+        const value = await this._getAsyncNext(iter);
+        this.assignTarget(node.target, value);
+
+        try {
+          // Execute body statements asynchronously
+          for (const stmt of node.body) {
+            await this.executeAsync(stmt);
+          }
+        } catch (e) {
+          if (e instanceof BreakLoop) {
+            brokeOut = true;
+            break;
+          }
+          if (e instanceof ContinueLoop) continue;
+          throw e;
+        }
+      }
+    } catch (e) {
+      // Check for StopAsyncIteration to end the loop
+      if (!(e instanceof StopAsyncIteration) && e.pyType !== 'StopAsyncIteration') throw e;
+    }
+
+    // Execute else clause if no break
+    if (!brokeOut) {
+      for (const stmt of node.orelse) {
+        await this.executeAsync(stmt);
       }
     }
 
@@ -2906,6 +3773,16 @@ export class Interpreter {
   }
 
   visitWith(node) {
+    // Check if this is an async with statement
+    if (node.isAsync) {
+      // If we're in async context, return the async promise
+      if (this.inAsyncContext) {
+        return this.visitWithAsync(node);
+      }
+      // If not in async context, need to wrap and await
+      throw new PyException('SyntaxError', 'async with outside async function');
+    }
+
     const managers = [];
     const enterValues = [];
 
@@ -2922,6 +3799,16 @@ export class Interpreter {
         value = this.callFunction(enterMethod, []);
       } else if (manager.__enter__) {
         value = manager.__enter__();
+      } else if (manager instanceof PyInstance) {
+        // Check if it has __aenter__ but not __enter__
+        const hasAenter = '__aenter__' in manager.cls.methods || this._getInheritedMethod(manager.cls, '__aenter__');
+        if (hasAenter) {
+          throw new PyException('TypeError', `'async with' received an object from an 'with' block that does not have __enter__`);
+        } else {
+          throw new PyException('AttributeError', `'${manager.cls.name}' object has no attribute '__enter__'`);
+        }
+      } else {
+        throw new PyException('AttributeError', `'${manager.$type || typeof manager}' object has no attribute '__enter__'`);
       }
 
       enterValues.push(value);
@@ -2961,6 +3848,102 @@ export class Interpreter {
         exitResult = this.callFunction(exitMethod, [excType, excValue, excTb]);
       } else if (manager.__exit__) {
         exitResult = manager.__exit__(excType, excValue, excTb);
+      } else if (manager instanceof PyInstance) {
+        // Check if it has __aexit__ but not __exit__
+        const hasAexit = '__aexit__' in manager.cls.methods || this._getInheritedMethod(manager.cls, '__aexit__');
+        if (hasAexit) {
+          throw new PyException('TypeError', `'async with' received an object from an 'with' block that does not have __exit__`);
+        } else {
+          throw new PyException('AttributeError', `'${manager.cls.name}' object has no attribute '__exit__'`);
+        }
+      } else {
+        throw new PyException('AttributeError', `'${manager.$type || typeof manager}' object has no attribute '__exit__'`);
+      }
+
+      // Check if exception should be suppressed
+      if (exitResult && (exitResult === true || exitResult === PY_TRUE || this._toBool(exitResult))) {
+        suppressed = true;
+      }
+    }
+
+    // Re-raise exception if not suppressed
+    if (exception && !suppressed) {
+      throw exception;
+    }
+
+    return PY_NONE;
+  }
+
+  async visitWithAsync(node) {
+    const managers = [];
+    const enterValues = [];
+
+    // Enter all context managers
+    for (const item of node.items) {
+      const manager = await this.executeAsync(item.contextExpr);
+      managers.push(manager);
+
+      // Call __aenter__
+      let value = manager;
+      let aenterMethod = null;
+
+      if (manager instanceof PyInstance) {
+        // Check for __aenter__ method
+        aenterMethod = manager.cls.methods['__aenter__'] || this._getInheritedMethod(manager.cls, '__aenter__');
+        if (aenterMethod) {
+          value = await this.callFunctionAsync(new PyMethod(aenterMethod, manager), []);
+        } else {
+          throw new PyException('AttributeError', `'${manager.cls.name}' object has no attribute '__aenter__'`);
+        }
+      } else if (typeof manager.__aenter__ === 'function') {
+        value = await manager.__aenter__();
+      } else {
+        throw new PyException('TypeError', `'${manager.$type}' object does not support async context management`);
+      }
+
+      enterValues.push(value);
+
+      if (item.optionalVars) {
+        this.assignTarget(item.optionalVars, value);
+      }
+    }
+
+    let exception = null;
+    let excType = PY_NONE;
+    let excValue = PY_NONE;
+    let excTb = PY_NONE;
+
+    try {
+      // Execute the with block body
+      for (const stmt of node.body) {
+        await this.executeAsync(stmt);
+      }
+    } catch (e) {
+      if (e instanceof PyException || e.pyType) {
+        exception = e;
+        excType = new PyStr(e.pyType);
+        excValue = new PyStr(e.pyMessage);
+        excTb = PY_NONE; // Traceback not fully implemented
+      } else {
+        throw e;
+      }
+    }
+
+    // Call __aexit__ on all managers in reverse order
+    let suppressed = false;
+    for (const manager of managers.slice().reverse()) {
+      let exitResult = PY_FALSE;
+
+      if (manager instanceof PyInstance) {
+        // Check for __aexit__ method
+        const aexitMethod = manager.cls.methods['__aexit__'] || this._getInheritedMethod(manager.cls, '__aexit__');
+        if (aexitMethod) {
+          exitResult = await this.callFunctionAsync(new PyMethod(aexitMethod, manager), [excType, excValue, excTb]);
+        } else {
+          throw new PyException('AttributeError', `'${manager.cls.name}' object has no attribute '__aexit__'`);
+        }
+      } else if (typeof manager.__aexit__ === 'function') {
+        exitResult = await manager.__aexit__(excType, excValue, excTb);
       }
 
       // Check if exception should be suppressed
@@ -3009,6 +3992,11 @@ export class Interpreter {
 
     // Check if function is a generator (contains yield)
     const isGenerator = this.containsYield(node.body);
+
+    // Validate: non-async functions cannot contain await
+    if (!node.isAsync && this.bodyContainsAwait(node.body)) {
+      throw new PyException('SyntaxError', "'await' outside async function");
+    }
 
     const func = new PyFunction(
       node.name,

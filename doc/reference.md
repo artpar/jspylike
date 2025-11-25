@@ -272,6 +272,30 @@ result = await coro  # Awaits the coroutine
 `);
 ```
 
+### PyAsyncGenerator
+
+Python async generator type (async function with yield).
+
+**Properties:**
+- `func` (PyFunction): The async generator function
+- `__aiter__()`: Returns self (async iterator protocol)
+- `__anext__()`: Returns next yielded value or raises StopAsyncIteration
+- `asend(value)`: Send value into async generator
+- `athrow(exc)`: Throw exception into async generator
+- `aclose()`: Close async generator
+
+**Example:**
+```javascript
+await interpreter.runAsync(`
+async def async_range(n):
+    for i in range(n):
+        yield i
+
+async for value in async_range(5):
+    print(value)  # Prints 0, 1, 2, 3, 4
+`);
+```
+
 ### PyClass
 
 Python class type.
@@ -316,6 +340,7 @@ new PyException(type, message, pythonTraceback = null)
 - `IndexError`: Index out of range
 - `KeyError`: Dictionary key not found
 - `StopIteration`: Iterator exhausted
+- `StopAsyncIteration`: Async iterator exhausted
 - `UnboundLocalError`: Local variable referenced before assignment
 - `SyntaxError`: Python syntax error
 - `IndentationError`: Indentation error
@@ -519,6 +544,73 @@ for (let i = 0; i < 5; i++) {
 }
 ```
 
+### Working with Async Features
+
+JSPyLike supports Python 3.5+ async/await features including:
+
+#### Async Iterators
+
+```javascript
+await interpreter.runAsync(`
+class AsyncRange:
+    def __init__(self, stop):
+        self.stop = stop
+        self.current = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self.current >= self.stop:
+            raise StopAsyncIteration
+        value = self.current
+        self.current += 1
+        return value
+
+# Use async for to iterate
+async for i in AsyncRange(5):
+    print(i)  # Prints 0, 1, 2, 3, 4
+`);
+```
+
+#### Async Context Managers
+
+```javascript
+await interpreter.runAsync(`
+class AsyncResource:
+    async def __aenter__(self):
+        print("Acquiring resource")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        print("Releasing resource")
+        return False
+
+# Use async with for context management
+async with AsyncResource() as resource:
+    print("Using resource")
+# Output:
+# Acquiring resource
+# Using resource
+# Releasing resource
+`);
+```
+
+#### Async Generators
+
+```javascript
+await interpreter.runAsync(`
+async def fetch_data():
+    for i in range(3):
+        # Simulate async operation
+        yield i * 2
+
+# Use async for to consume
+async for value in fetch_data():
+    print(value)  # Prints 0, 2, 4
+`);
+```
+
 ## Performance Considerations
 
 - JSPyLike interprets Python code at runtime, making it slower than native Python
@@ -533,8 +625,7 @@ JSPyLike implements core Python 3 features but doesn't include:
 - Network operations
 - Most standard library modules
 - C extensions
-- Async iterators and generators (async for/async with)
-- asyncio module
+- asyncio module (though async/await, async for, async with, and async generators are supported)
 - Some advanced metaclass features
 - Certain optimization features
 
