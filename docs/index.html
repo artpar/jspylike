@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSPyLike Playground - Python 3 in JavaScript</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin: 5px;
+        }
+
+        .playground {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            height: calc(100vh - 200px);
+            min-height: 600px;
+        }
+
+        .editor-section, .output-section {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .editor-section {
+            border-right: 2px solid #e0e0e0;
+        }
+
+        .section-header {
+            background: #f5f5f5;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-header h2 {
+            font-size: 1.2rem;
+            color: #333;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .run-btn {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .run-btn:hover {
+            background: #45a049;
+            transform: translateY(-1px);
+        }
+
+        .run-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .clear-btn {
+            background: #f44336;
+            color: white;
+        }
+
+        .clear-btn:hover {
+            background: #da190b;
+        }
+
+        select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            background: white;
+        }
+
+        .CodeMirror {
+            height: 100% !important;
+            font-size: 14px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        .output-content {
+            flex: 1;
+            padding: 20px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        .output-line {
+            margin-bottom: 5px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .output-error {
+            color: #f48771;
+            background: rgba(244, 135, 113, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+
+        .output-success {
+            color: #a9dc76;
+        }
+
+        .output-info {
+            color: #78dce8;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        footer {
+            background: #f5f5f5;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 968px) {
+            .playground {
+                grid-template-columns: 1fr;
+                height: auto;
+            }
+
+            .editor-section {
+                border-right: none;
+                border-bottom: 2px solid #e0e0e0;
+                min-height: 400px;
+            }
+
+            .output-section {
+                min-height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🐍 JSPyLike Playground</h1>
+            <p>Python 3 Interpreter in JavaScript - Run Python code directly in your browser!</p>
+            <div>
+                <span class="badge">874 tests passing</span>
+                <span class="badge">Async/Await</span>
+                <span class="badge">Full Python 3</span>
+            </div>
+        </header>
+
+        <div class="playground">
+            <div class="editor-section">
+                <div class="section-header">
+                    <h2>Python Code</h2>
+                    <div class="controls">
+                        <select id="examples">
+                            <option value="">Load Example...</option>
+                            <option value="hello">Hello World</option>
+                            <option value="fibonacci">Fibonacci</option>
+                            <option value="classes">Classes & OOP</option>
+                            <option value="async">Async/Await</option>
+                            <option value="comprehensions">List Comprehensions</option>
+                            <option value="decorators">Decorators</option>
+                            <option value="generators">Generators</option>
+                        </select>
+                    </div>
+                </div>
+                <textarea id="code"># Welcome to JSPyLike Playground!
+# Write Python 3 code and click Run
+
+def greet(name):
+    return f"Hello, {name}!"
+
+print(greet("World"))
+
+# Try some Python features:
+numbers = [1, 2, 3, 4, 5]
+squares = [x**2 for x in numbers]
+print(f"Squares: {squares}")
+</textarea>
+            </div>
+
+            <div class="output-section">
+                <div class="section-header">
+                    <h2>Output</h2>
+                    <div class="controls">
+                        <button class="run-btn" id="runBtn">▶ Run</button>
+                        <button class="clear-btn" id="clearBtn">Clear</button>
+                    </div>
+                </div>
+                <div class="output-content" id="output">
+                    <div class="output-info">Ready! Write some Python code and click Run.</div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>
+                <strong>JSPyLike v1.0.0</strong> -
+                <a href="https://github.com/artpar/jspylike" target="_blank">GitHub</a> |
+                <a href="https://www.npmjs.com/package/jspylike" target="_blank">NPM</a> |
+                Made with ❤️ by Parth Mudgal
+            </p>
+        </footer>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    <script type="module">
+        // Import jspylike from local bundle (also available via CDN)
+        import { Interpreter } from './lib/src/index.js';
+
+        const examples = {
+            hello: `# Hello World
+print("Hello, World!")
+
+# Variables and types
+name = "Python"
+version = 3
+active = True
+
+print(f"{name} {version} is active: {active}")`,
+
+            fibonacci: `# Fibonacci sequence
+def fibonacci(n):
+    a, b = 0, 1
+    result = []
+    for _ in range(n):
+        result.append(a)
+        a, b = b, a + b
+    return result
+
+print("First 10 Fibonacci numbers:")
+print(fibonacci(10))`,
+
+            classes: `# Object-Oriented Programming
+class Animal:
+    def __init__(self, name):
+        self.name = name
+
+    def speak(self):
+        return "Some sound"
+
+class Dog(Animal):
+    def speak(self):
+        return f"{self.name} says Woof!"
+
+class Cat(Animal):
+    def speak(self):
+        return f"{self.name} says Meow!"
+
+dog = Dog("Buddy")
+cat = Cat("Whiskers")
+
+print(dog.speak())
+print(cat.speak())`,
+
+            async: `# Async/Await
+async def fetch_data(item):
+    return f"Fetched: {item}"
+
+async def process_items():
+    items = ["apple", "banana", "cherry"]
+    results = []
+
+    for item in items:
+        data = await fetch_data(item)
+        results.append(data)
+
+    return results
+
+result = await process_items()
+print("Results:", result)`,
+
+            comprehensions: `# List Comprehensions
+numbers = range(1, 11)
+
+# Basic list comprehension
+squares = [x**2 for x in numbers]
+print("Squares:", squares)
+
+# With condition
+evens = [x for x in numbers if x % 2 == 0]
+print("Evens:", evens)
+
+# Dict comprehension
+square_dict = {x: x**2 for x in range(1, 6)}
+print("Square dict:", square_dict)
+
+# Set comprehension
+unique_lengths = {len(word) for word in ["hello", "world", "python", "code"]}
+print("Unique word lengths:", unique_lengths)`,
+
+            decorators: `# Decorators
+def uppercase(func):
+    def wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        return result.upper()
+    return wrapper
+
+def repeat(times):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            results = []
+            for _ in range(times):
+                results.append(func(*args, **kwargs))
+            return results
+        return wrapper
+    return decorator
+
+@uppercase
+def greet(name):
+    return f"hello, {name}"
+
+@repeat(3)
+def say(word):
+    return word
+
+print(greet("world"))
+print(say("Python!"))`,
+
+            generators: `# Generators
+def countdown(n):
+    while n > 0:
+        yield n
+        n -= 1
+
+print("Countdown:")
+for num in countdown(5):
+    print(num)
+
+# Generator expression
+squares_gen = (x**2 for x in range(5))
+print("\\nSquares from generator:")
+for square in squares_gen:
+    print(square)`
+        };
+
+        // Initialize CodeMirror
+        const editor = CodeMirror.fromTextArea(document.getElementById('code'), {
+            mode: 'python',
+            theme: 'monokai',
+            lineNumbers: true,
+            indentUnit: 4,
+            indentWithTabs: false,
+            lineWrapping: true
+        });
+
+        const output = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const examplesSelect = document.getElementById('examples');
+
+        // Custom print function to capture output
+        let outputLines = [];
+
+        function customPrint(...args) {
+            const line = args.map(arg => {
+                if (typeof arg === 'object' && arg !== null) {
+                    if (arg.toJS) return JSON.stringify(arg.toJS());
+                    if (arg.value !== undefined) return String(arg.value);
+                    return JSON.stringify(arg);
+                }
+                return String(arg);
+            }).join(' ');
+            outputLines.push({ type: 'output', text: line });
+            updateOutput();
+        }
+
+        function addOutput(text, type = 'info') {
+            outputLines.push({ type, text });
+            updateOutput();
+        }
+
+        function updateOutput() {
+            output.innerHTML = outputLines.map(line => {
+                const className = line.type === 'error' ? 'output-error' :
+                                 line.type === 'success' ? 'output-success' :
+                                 'output-line';
+                return `<div class="${className}">${escapeHtml(line.text)}</div>`;
+            }).join('');
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function runCode() {
+            const code = editor.getValue();
+            outputLines = [];
+            runBtn.disabled = true;
+            runBtn.innerHTML = '⏳ Running<span class="loading"></span>';
+
+            try {
+                const interpreter = new Interpreter();
+
+                // Override print function
+                interpreter.globals.set('print', {
+                    $type: 'builtin_function_or_method',
+                    name: 'print',
+                    call: customPrint
+                });
+
+                addOutput('>>> Running code...', 'info');
+
+                // Check if code contains async/await
+                const isAsync = /\bawait\b/.test(code) || /^async\s+def\b/m.test(code);
+
+                if (isAsync) {
+                    const result = await interpreter.runAsync(code);
+                    if (result && result.value !== undefined && result.value !== null) {
+                        if (outputLines.length === 1) { // Only the "Running" message
+                            addOutput(`Result: ${result.value}`, 'success');
+                        }
+                    }
+                } else {
+                    const result = interpreter.run(code);
+                    if (result && result.value !== undefined && result.value !== null) {
+                        if (outputLines.length === 1) {
+                            addOutput(`Result: ${result.value}`, 'success');
+                        }
+                    }
+                }
+
+                if (outputLines.length === 1) {
+                    addOutput('✓ Code executed successfully (no output)', 'success');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                const errorMsg = error.pyMessage || error.message || String(error);
+                const errorType = error.pyType || error.name || 'Error';
+                addOutput(`${errorType}: ${errorMsg}`, 'error');
+
+                if (error.stack) {
+                    console.log('Stack trace:', error.stack);
+                }
+            } finally {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '▶ Run';
+            }
+        }
+
+        function clearOutput() {
+            outputLines = [];
+            output.innerHTML = '<div class="output-info">Output cleared. Ready to run!</div>';
+        }
+
+        // Event listeners
+        runBtn.addEventListener('click', runCode);
+        clearBtn.addEventListener('click', clearOutput);
+
+        examplesSelect.addEventListener('change', (e) => {
+            const example = e.target.value;
+            if (example && examples[example]) {
+                editor.setValue(examples[example]);
+                clearOutput();
+            }
+            e.target.value = '';
+        });
+
+        // Keyboard shortcut: Ctrl+Enter or Cmd+Enter to run
+        editor.setOption('extraKeys', {
+            'Ctrl-Enter': runCode,
+            'Cmd-Enter': runCode
+        });
+
+        // Auto-run on load (commented out for now)
+        // setTimeout(() => runCode(), 100);
+    </script>
+</body>
+</html>
