@@ -15,206 +15,243 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #f8f9fa;
             min-height: 100vh;
-            padding: 20px;
         }
 
         .container {
-            max-width: 1400px;
-            margin: 0 auto;
+            max-width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
         }
 
         header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
 
         header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a1a1a;
+            letter-spacing: -0.025em;
         }
 
-        header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
+        .header-meta {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            font-size: 0.875rem;
+            color: #6b7280;
         }
 
-        .badge {
-            display: inline-block;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin: 5px;
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .meta-item::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #10b981;
+        }
+
+        .header-links {
+            display: flex;
+            gap: 16px;
+        }
+
+        .header-links a {
+            color: #6b7280;
+            text-decoration: none;
+            font-size: 0.875rem;
+            transition: color 0.2s;
+        }
+
+        .header-links a:hover {
+            color: #2563eb;
         }
 
         .playground {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 0;
-            height: calc(100vh - 200px);
-            min-height: 600px;
+            flex: 1;
+            overflow: hidden;
         }
 
         .editor-section, .output-section {
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
         .editor-section {
-            border-right: 2px solid #e0e0e0;
+            border-right: 1px solid #e5e7eb;
         }
 
         .section-header {
-            background: #f5f5f5;
-            padding: 15px 20px;
-            border-bottom: 1px solid #e0e0e0;
+            background: #fafafa;
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
 
         .section-header h2 {
-            font-size: 1.2rem;
-            color: #333;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #374151;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         .controls {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
         }
 
         button {
-            padding: 10px 20px;
-            border: none;
+            padding: 6px 14px;
+            border: 1px solid #e5e7eb;
             border-radius: 6px;
             cursor: pointer;
-            font-size: 0.95rem;
+            font-size: 0.875rem;
             font-weight: 500;
-            transition: all 0.2s;
+            transition: all 0.15s;
+            background: white;
+            color: #374151;
         }
 
         .run-btn {
-            background: #4CAF50;
+            background: #2563eb;
             color: white;
+            border-color: #2563eb;
         }
 
         .run-btn:hover {
-            background: #45a049;
-            transform: translateY(-1px);
+            background: #1d4ed8;
+            border-color: #1d4ed8;
         }
 
         .run-btn:disabled {
-            background: #ccc;
+            background: #e5e7eb;
+            color: #9ca3af;
+            border-color: #e5e7eb;
             cursor: not-allowed;
-            transform: none;
-        }
-
-        .clear-btn {
-            background: #f44336;
-            color: white;
         }
 
         .clear-btn:hover {
-            background: #da190b;
+            background: #f9fafb;
+            border-color: #d1d5db;
         }
 
         select {
-            padding: 8px 12px;
-            border: 2px solid #ddd;
+            padding: 6px 12px;
+            border: 1px solid #e5e7eb;
             border-radius: 6px;
-            font-size: 0.9rem;
+            font-size: 0.875rem;
             cursor: pointer;
             background: white;
+            color: #374151;
+        }
+
+        select:hover {
+            border-color: #d1d5db;
         }
 
         .CodeMirror {
             height: 100% !important;
-            font-size: 14px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
         }
 
         .output-content {
             flex: 1;
-            padding: 20px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 14px;
+            padding: 16px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
             overflow-y: auto;
             background: #1e1e1e;
             color: #d4d4d4;
         }
 
         .output-line {
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             white-space: pre-wrap;
             word-wrap: break-word;
         }
 
         .output-error {
-            color: #f48771;
-            background: rgba(244, 135, 113, 0.1);
-            padding: 10px;
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
+            padding: 8px 12px;
+            border-left: 3px solid #ef4444;
             border-radius: 4px;
-            margin: 5px 0;
+            margin: 4px 0;
         }
 
         .output-success {
-            color: #a9dc76;
+            color: #34d399;
         }
 
         .output-info {
-            color: #78dce8;
+            color: #60a5fa;
         }
 
         .loading {
             display: inline-block;
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             border: 2px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             border-top-color: white;
-            animation: spin 0.8s linear infinite;
-            margin-left: 8px;
+            animation: spin 0.6s linear infinite;
+            margin-left: 6px;
+            vertical-align: middle;
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
-        footer {
-            background: #f5f5f5;
-            padding: 20px;
-            text-align: center;
-            color: #666;
-            font-size: 0.9rem;
-        }
-
-        footer a {
-            color: #667eea;
-            text-decoration: none;
-        }
-
-        footer a:hover {
-            text-decoration: underline;
-        }
-
         @media (max-width: 968px) {
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .header-links {
+                width: 100%;
+                justify-content: flex-start;
+            }
+
             .playground {
                 grid-template-columns: 1fr;
-                height: auto;
             }
 
             .editor-section {
                 border-right: none;
-                border-bottom: 2px solid #e0e0e0;
+                border-bottom: 1px solid #e5e7eb;
                 min-height: 400px;
             }
 
@@ -227,41 +264,46 @@
 <body>
     <div class="container">
         <header>
-            <h1>🐍 JSPyLike Playground</h1>
-            <p>Python 3 Interpreter in JavaScript - Run Python code directly in your browser!</p>
-            <div>
-                <span class="badge">874 tests passing</span>
-                <span class="badge">Async/Await</span>
-                <span class="badge">Full Python 3</span>
+            <div class="header-left">
+                <h1>JSPyLike Playground</h1>
+                <div class="header-meta">
+                    <span class="meta-item">874 tests passing</span>
+                    <span class="meta-item">v1.0.0</span>
+                </div>
+            </div>
+            <div class="header-links">
+                <a href="https://github.com/artpar/jspylike" target="_blank">GitHub</a>
+                <a href="https://www.npmjs.com/package/jspylike" target="_blank">NPM</a>
+                <a href="https://github.com/artpar/jspylike#readme" target="_blank">Docs</a>
             </div>
         </header>
 
         <div class="playground">
             <div class="editor-section">
                 <div class="section-header">
-                    <h2>Python Code</h2>
+                    <h2>Editor</h2>
                     <div class="controls">
                         <select id="examples">
-                            <option value="">Load Example...</option>
+                            <option value="">Examples</option>
                             <option value="hello">Hello World</option>
                             <option value="fibonacci">Fibonacci</option>
-                            <option value="classes">Classes & OOP</option>
+                            <option value="classes">Classes</option>
                             <option value="async">Async/Await</option>
-                            <option value="comprehensions">List Comprehensions</option>
+                            <option value="comprehensions">Comprehensions</option>
                             <option value="decorators">Decorators</option>
                             <option value="generators">Generators</option>
                         </select>
                     </div>
                 </div>
-                <textarea id="code"># Welcome to JSPyLike Playground!
-# Write Python 3 code and click Run
+                <textarea id="code"># Welcome to JSPyLike Playground
+# Write Python 3 code and press Ctrl/Cmd+Enter to run
 
 def greet(name):
     return f"Hello, {name}!"
 
 print(greet("World"))
 
-# Try some Python features:
+# Try Python features
 numbers = [1, 2, 3, 4, 5]
 squares = [x**2 for x in numbers]
 print(f"Squares: {squares}")
@@ -270,26 +312,17 @@ print(f"Squares: {squares}")
 
             <div class="output-section">
                 <div class="section-header">
-                    <h2>Output</h2>
+                    <h2>Console</h2>
                     <div class="controls">
-                        <button class="run-btn" id="runBtn">▶ Run</button>
+                        <button class="run-btn" id="runBtn">Run</button>
                         <button class="clear-btn" id="clearBtn">Clear</button>
                     </div>
                 </div>
                 <div class="output-content" id="output">
-                    <div class="output-info">Ready! Write some Python code and click Run.</div>
+                    <div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>
                 </div>
             </div>
         </div>
-
-        <footer>
-            <p>
-                <strong>JSPyLike v1.0.0</strong> -
-                <a href="https://github.com/artpar/jspylike" target="_blank">GitHub</a> |
-                <a href="https://www.npmjs.com/package/jspylike" target="_blank">NPM</a> |
-                Made with ❤️ by Parth Mudgal
-            </p>
-        </footer>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
@@ -480,7 +513,7 @@ for square in squares_gen:
             const code = editor.getValue();
             outputLines = [];
             runBtn.disabled = true;
-            runBtn.innerHTML = '⏳ Running<span class="loading"></span>';
+            runBtn.innerHTML = 'Running<span class="loading"></span>';
 
             try {
                 const interpreter = new Interpreter();
@@ -503,29 +536,27 @@ for square in squares_gen:
                     return PY_NONE;
                 }, 0, Infinity));
 
-                addOutput('>>> Running code...', 'info');
-
                 // Check if code contains async/await
                 const isAsync = /\bawait\b/.test(code) || /^async\s+def\b/m.test(code);
 
                 if (isAsync) {
                     const result = await interpreter.runAsync(code);
                     if (result && result.value !== undefined && result.value !== null) {
-                        if (outputLines.length === 1) { // Only the "Running" message
-                            addOutput(`Result: ${result.value}`, 'success');
+                        if (outputLines.length === 0) {
+                            addOutput(`${result.value}`, 'success');
                         }
                     }
                 } else {
                     const result = interpreter.run(code);
                     if (result && result.value !== undefined && result.value !== null) {
-                        if (outputLines.length === 1) {
-                            addOutput(`Result: ${result.value}`, 'success');
+                        if (outputLines.length === 0) {
+                            addOutput(`${result.value}`, 'success');
                         }
                     }
                 }
 
-                if (outputLines.length === 1) {
-                    addOutput('✓ Code executed successfully (no output)', 'success');
+                if (outputLines.length === 0) {
+                    addOutput('(no output)', 'info');
                 }
 
             } catch (error) {
@@ -539,13 +570,13 @@ for square in squares_gen:
                 }
             } finally {
                 runBtn.disabled = false;
-                runBtn.innerHTML = '▶ Run';
+                runBtn.innerHTML = 'Run';
             }
         }
 
         function clearOutput() {
             outputLines = [];
-            output.innerHTML = '<div class="output-info">Output cleared. Ready to run!</div>';
+            output.innerHTML = '<div class="output-info">Ready. Press Run or Ctrl/Cmd+Enter to execute.</div>';
         }
 
         // Event listeners
