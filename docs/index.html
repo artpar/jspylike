@@ -424,7 +424,7 @@ print(f"Squares: {squares}")
 
         // Dynamic import with cache-busting query param
         const cacheBuster = Date.now();
-        const { Interpreter, PyBuiltin, PY_NONE, Parser, Lexer } = await import(`${cdnBase}/index.js?v=${cacheBuster}`);
+        const { Interpreter, PyBuiltin, PY_NONE, Parser } = await import(`${cdnBase}/index.js?v=${cacheBuster}`);
 
         const examples = {
             hello: `# Hello World
@@ -641,9 +641,7 @@ for square in squares_gen:
 
         function updateAST(code) {
             try {
-                const lexer = new Lexer(code);
-                const tokens = lexer.tokenize();
-                const parser = new Parser(tokens);
+                const parser = new Parser(code);
                 const ast = parser.parse();
                 astOutput.innerHTML = renderAST(ast);
             } catch (error) {
